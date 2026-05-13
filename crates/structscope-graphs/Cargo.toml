@@ -1,0 +1,10 @@
+[package]
+name = "structscope-graphs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+petgraph.workspace = true
+serde.workspace = true
+structscope-core = { path = "../structscope-core" }

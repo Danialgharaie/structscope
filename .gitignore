@@ -1,0 +1,6 @@
+/target
+html-docs/
+*.sqlite
+*.db
+*.jsonl
+*.graphml

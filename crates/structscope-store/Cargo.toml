@@ -1,0 +1,15 @@
+[package]
+name = "structscope-store"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+duckdb = []
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+structscope-features = { path = "../structscope-features" }
