@@ -247,10 +247,18 @@ fn collect_inputs(input: &Path) -> Result<Vec<PathBuf>> {
 }
 
 fn is_supported_file(path: &Path) -> bool {
-    matches!(
-        path.extension().and_then(|ext| ext.to_str()),
-        Some("pdb") | Some("cif") | Some("mmcif")
-    )
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| {
+            let name = name.to_ascii_lowercase();
+            name.ends_with(".pdb")
+                || name.ends_with(".cif")
+                || name.ends_with(".mmcif")
+                || name.ends_with(".pdb.gz")
+                || name.ends_with(".cif.gz")
+                || name.ends_with(".mmcif.gz")
+        })
+        .unwrap_or(false)
 }
 
 #[allow(dead_code)]

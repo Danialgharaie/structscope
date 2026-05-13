@@ -1,7 +1,9 @@
 use crate::model::{Atom, Chain, Residue, Structure, StructureMetadata};
-use anyhow::Context;
-use std::collections::BTreeMap;
-use std::fs;
+use pdbrust::{
+    parse_gzip_structure_file, parse_mmcif_string, parse_pdb_string, parse_structure_file, Atom as PdAtom,
+    PdbStructure,
+};
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use thiserror::Error;
 
@@ -20,6 +22,7 @@ impl Default for ParseOptions {
 pub enum InputFormat {
     Pdb,
     Mmcif,
+    BinaryCif,
 }
 
 #[derive(Debug, Error)]
@@ -33,10 +36,19 @@ pub enum ParseError {
 }
 
 pub fn parse_file(path: &Path, options: ParseOptions) -> Result<Structure, ParseError> {
-    let contents = fs::read_to_string(path)?;
     let format = detect_format(path)?;
     let source_path = Some(path.display().to_string());
-    parse_str(&contents, format, source_path, options)
+    if matches!(format, InputFormat::BinaryCif) {
+        return Err(ParseError::UnsupportedFormat(
+            "BinaryCIF input is not implemented yet".to_string(),
+        ));
+    }
+    let parsed = if is_gzip_path(path) {
+        parse_gzip_structure_file(path).map_err(|err| ParseError::Invalid(err.to_string()))?
+    } else {
+        parse_structure_file(path).map_err(|err| ParseError::Invalid(err.to_string()))?
+    };
+    convert_structure(parsed, format, source_path, options)
 }
 
 pub fn parse_str(
@@ -45,279 +57,123 @@ pub fn parse_str(
     source_path: Option<String>,
     options: ParseOptions,
 ) -> Result<Structure, ParseError> {
-    match format {
-        InputFormat::Pdb => parse_pdb(contents, source_path, options),
-        InputFormat::Mmcif => parse_mmcif(contents, source_path, options),
-    }
+    let parsed = match format {
+        InputFormat::Pdb => parse_pdb_string(contents).map_err(|err| ParseError::Invalid(err.to_string()))?,
+        InputFormat::Mmcif => parse_mmcif_string(contents).map_err(|err| ParseError::Invalid(err.to_string()))?,
+        InputFormat::BinaryCif => {
+            return Err(ParseError::UnsupportedFormat(
+                "BinaryCIF input is not implemented yet".to_string(),
+            ))
+        }
+    };
+    convert_structure(parsed, format, source_path, options)
 }
 
 fn detect_format(path: &Path) -> Result<InputFormat, ParseError> {
-    match path.extension().and_then(|ext| ext.to_str()) {
-        Some("pdb") => Ok(InputFormat::Pdb),
-        Some("cif") | Some("mmcif") => Ok(InputFormat::Mmcif),
-        _ => Err(ParseError::UnsupportedFormat(path.display().to_string())),
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| ParseError::UnsupportedFormat(path.display().to_string()))?
+        .to_ascii_lowercase();
+
+    if name.ends_with(".pdb") || name.ends_with(".ent") || name.ends_with(".pdb.gz") || name.ends_with(".ent.gz") {
+        Ok(InputFormat::Pdb)
+    } else if name.ends_with(".cif")
+        || name.ends_with(".mmcif")
+        || name.ends_with(".cif.gz")
+        || name.ends_with(".mmcif.gz")
+    {
+        Ok(InputFormat::Mmcif)
+    } else if name.ends_with(".bcif") || name.ends_with(".bcif.gz") {
+        Ok(InputFormat::BinaryCif)
+    } else {
+        Err(ParseError::UnsupportedFormat(path.display().to_string()))
     }
 }
 
-fn parse_pdb(
-    contents: &str,
+fn convert_structure(
+    parsed: PdbStructure,
+    format: InputFormat,
     source_path: Option<String>,
     options: ParseOptions,
 ) -> Result<Structure, ParseError> {
-    let mut title = None;
-    let mut chains: BTreeMap<String, BTreeMap<(i32, String, bool), Vec<Atom>>> = BTreeMap::new();
-    let mut residue_names: BTreeMap<(String, i32, String, bool), String> = BTreeMap::new();
-
-    for line in contents.lines() {
-        if line.starts_with("TITLE") && title.is_none() {
-            title = Some(slice(line, 10, line.len()).trim().to_string());
-        }
-
-        if !(line.starts_with("ATOM") || line.starts_with("HETATM")) {
-            continue;
-        }
-
-        let is_hetero = line.starts_with("HETATM");
-        if is_hetero && !options.keep_hetero {
-            continue;
-        }
-
-        let serial = slice(line, 6, 11).trim().parse::<i32>().ok();
-        let atom_name = slice(line, 12, 16).trim().to_string();
-        let residue_name = slice(line, 17, 20).trim().to_string();
-        let chain_label = slice(line, 21, 22).trim().to_string();
-        let residue_seq = slice(line, 22, 26).trim().parse::<i32>().unwrap_or_default();
-        let insertion_code = slice(line, 26, 27).trim().to_string();
-        let x = slice(line, 30, 38).trim().parse::<f64>().unwrap_or_default();
-        let y = slice(line, 38, 46).trim().parse::<f64>().unwrap_or_default();
-        let z = slice(line, 46, 54).trim().parse::<f64>().unwrap_or_default();
-        let occupancy = slice(line, 54, 60).trim().parse::<f64>().ok();
-        let element = Some(slice(line, 76, 78).trim().to_string()).filter(|s| !s.is_empty());
-
-        let chain_key = if chain_label.is_empty() {
-            "_".to_string()
-        } else {
-            chain_label
-        };
-        let insertion = insertion_code.clone();
-        let atom = Atom {
-            id: String::new(),
-            serial,
-            name: atom_name,
-            element,
-            x,
-            y,
-            z,
-            occupancy,
-        };
-        chains
-            .entry(chain_key.clone())
-            .or_default()
-            .entry((residue_seq, insertion.clone(), is_hetero))
-            .or_default()
-            .push(atom);
-        residue_names.insert((chain_key, residue_seq, insertion, is_hetero), residue_name);
-    }
-
-    build_structure(
-        title,
-        "pdb",
-        source_path,
-        chains,
-        residue_names,
-    )
-}
-
-fn parse_mmcif(
-    contents: &str,
-    source_path: Option<String>,
-    options: ParseOptions,
-) -> Result<Structure, ParseError> {
-    let mut title = None;
-    let mut atom_headers: Vec<String> = Vec::new();
-    let mut in_atom_loop = false;
-    let mut reading_headers = false;
-    let mut chains: BTreeMap<String, BTreeMap<(i32, String, bool), Vec<Atom>>> = BTreeMap::new();
-    let mut residue_names: BTreeMap<(String, i32, String, bool), String> = BTreeMap::new();
-
-    for raw in contents.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        if line.starts_with("_struct.title") && title.is_none() {
-            title = Some(line.trim_start_matches("_struct.title").trim().trim_matches('\'').trim_matches('"').to_string());
-            continue;
-        }
-
-        if line == "loop_" {
-            atom_headers.clear();
-            in_atom_loop = false;
-            reading_headers = true;
-            continue;
-        }
-
-        if reading_headers && line.starts_with("_atom_site.") {
-            in_atom_loop = true;
-            atom_headers.push(line.to_string());
-            continue;
-        }
-
-        if reading_headers && line.starts_with('_') {
-            continue;
-        }
-
-        if in_atom_loop {
-            if line.starts_with('_') || line == "loop_" {
-                break;
-            }
-
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() < atom_headers.len() || atom_headers.is_empty() {
-                continue;
-            }
-
-            let get = |name: &str| -> Option<&str> {
-                atom_headers
-                    .iter()
-                    .position(|header| header == name)
-                    .and_then(|idx| fields.get(idx).copied())
-            };
-
-            let group = get("_atom_site.group_PDB").unwrap_or("ATOM");
-            let is_hetero = group == "HETATM";
-            if is_hetero && !options.keep_hetero {
-                continue;
-            }
-
-            let chain_label = get("_atom_site.auth_asym_id")
-                .or_else(|| get("_atom_site.label_asym_id"))
-                .unwrap_or("_");
-            let residue_name = get("_atom_site.auth_comp_id")
-                .or_else(|| get("_atom_site.label_comp_id"))
-                .unwrap_or("UNK");
-            let residue_seq = get("_atom_site.auth_seq_id")
-                .or_else(|| get("_atom_site.label_seq_id"))
-                .unwrap_or("0")
-                .parse::<i32>()
-                .unwrap_or_default();
-            let insertion = get("_atom_site.pdbx_PDB_ins_code")
-                .filter(|value| *value != "." && *value != "?")
-                .unwrap_or("")
-                .to_string();
-            let atom_name = get("_atom_site.label_atom_id")
-                .or_else(|| get("_atom_site.auth_atom_id"))
-                .unwrap_or("X");
-            let serial = get("_atom_site.id").and_then(|value| value.parse::<i32>().ok());
-            let x = get("_atom_site.Cartn_x")
-                .context("missing Cartn_x")
-                .map_err(|err| ParseError::Invalid(err.to_string()))?
-                .parse::<f64>()
-                .unwrap_or_default();
-            let y = get("_atom_site.Cartn_y")
-                .context("missing Cartn_y")
-                .map_err(|err| ParseError::Invalid(err.to_string()))?
-                .parse::<f64>()
-                .unwrap_or_default();
-            let z = get("_atom_site.Cartn_z")
-                .context("missing Cartn_z")
-                .map_err(|err| ParseError::Invalid(err.to_string()))?
-                .parse::<f64>()
-                .unwrap_or_default();
-            let occupancy = get("_atom_site.occupancy").and_then(|value| value.parse::<f64>().ok());
-            let element = get("_atom_site.type_symbol")
-                .map(|value| value.to_string())
-                .filter(|value| !value.is_empty());
-
-            let chain_key = chain_label.to_string();
-            let atom = Atom {
-                id: String::new(),
-                serial,
-                name: atom_name.to_string(),
-                element,
-                x,
-                y,
-                z,
-                occupancy,
-            };
-            chains
-                .entry(chain_key.clone())
-                .or_default()
-                .entry((residue_seq, insertion.clone(), is_hetero))
-                .or_default()
-                .push(atom);
-            residue_names.insert(
-                (chain_key, residue_seq, insertion, is_hetero),
-                residue_name.to_string(),
-            );
-        }
-    }
-
-    build_structure(
-        title,
-        "mmcif",
-        source_path,
-        chains,
-        residue_names,
-    )
-}
-
-fn build_structure(
-    title: Option<String>,
-    source_format: &str,
-    source_path: Option<String>,
-    chains_map: BTreeMap<String, BTreeMap<(i32, String, bool), Vec<Atom>>>,
-    residue_names: BTreeMap<(String, i32, String, bool), String>,
-) -> Result<Structure, ParseError> {
+    let source_format = match format {
+        InputFormat::Pdb => "pdb",
+        InputFormat::Mmcif => "mmcif",
+        InputFormat::BinaryCif => "bcif",
+    };
     let structure_id = source_path
         .as_deref()
-        .and_then(|path| Path::new(path).file_stem())
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("structure")
-        .to_string();
+        .map(structure_id_from_path)
+        .unwrap_or_else(|| "structure".to_string());
+
+    let filtered_atoms = retain_selected_altlocs(parsed.atoms, options.keep_hetero);
+    let mut chains_map: BTreeMap<String, BTreeMap<(i32, String, bool), Vec<PdAtom>>> = BTreeMap::new();
+
+    for atom in filtered_atoms {
+        let chain_key = if atom.chain_id.trim().is_empty() {
+            "_".to_string()
+        } else {
+            atom.chain_id.trim().to_string()
+        };
+        let insertion = atom.ins_code.map(|code| code.to_string()).unwrap_or_default();
+        chains_map
+            .entry(chain_key)
+            .or_default()
+            .entry((atom.residue_seq, insertion, atom.is_hetatm))
+            .or_default()
+            .push(atom);
+    }
 
     let mut chains = Vec::new();
     for (chain_label, residues_map) in chains_map {
+        let chain_id = format!("{structure_id}:{chain_label}");
         let mut residues = Vec::new();
-        for ((seq_number, insertion_code, is_hetero), atoms) in residues_map {
+        for ((seq_number, insertion_code, is_hetero), mut atoms) in residues_map {
+            atoms.sort_by(|left, right| {
+                left.serial
+                    .cmp(&right.serial)
+                    .then_with(|| left.name.cmp(&right.name))
+                    .then_with(|| left.alt_loc.cmp(&right.alt_loc))
+            });
+
+            let residue_name = atoms
+                .first()
+                .map(|atom| atom.residue_name.trim().to_string())
+                .unwrap_or_else(|| "UNK".to_string());
             let residue_id = format!(
                 "{}:{}:{}:{}",
                 structure_id,
                 chain_label,
                 seq_number,
-                if insertion_code.is_empty() {
-                    "_"
-                } else {
-                    &insertion_code
-                }
+                if insertion_code.is_empty() { "_" } else { &insertion_code }
             );
-            let residue_name = residue_names
-                .get(&(chain_label.clone(), seq_number, insertion_code.clone(), is_hetero))
-                .cloned()
-                .unwrap_or_else(|| "UNK".to_string());
+
             let atoms = atoms
                 .into_iter()
                 .enumerate()
-                .map(|(idx, mut atom)| {
-                    atom.id = format!("{residue_id}:{idx}:{}", atom.name);
-                    atom
+                .map(|(idx, atom)| Atom {
+                    id: format!("{residue_id}:{idx}:{}", atom.name.trim()),
+                    serial: Some(atom.serial),
+                    name: atom.name.trim().to_string(),
+                    element: normalize_string(Some(atom.element)),
+                    x: atom.x,
+                    y: atom.y,
+                    z: atom.z,
+                    occupancy: Some(atom.occupancy),
                 })
                 .collect();
+
             residues.push(Residue {
                 id: residue_id,
                 name: residue_name,
                 seq_number,
-                insertion_code: if insertion_code.is_empty() {
-                    None
-                } else {
-                    Some(insertion_code)
-                },
+                insertion_code: normalize_string(Some(insertion_code)),
                 atoms,
                 is_hetero,
             });
         }
-        let chain_id = format!("{structure_id}:{chain_label}");
+
         chains.push(Chain {
             id: chain_id,
             label: chain_label,
@@ -334,19 +190,116 @@ fn build_structure(
         metadata: StructureMetadata {
             source_format: source_format.to_string(),
             source_path,
-            title,
+            title: parsed.title.or(parsed.header),
         },
         chains,
     })
 }
 
-fn slice(line: &str, start: usize, end: usize) -> &str {
-    line.get(start..line.len().min(end)).unwrap_or("")
+fn retain_selected_altlocs(atoms: Vec<PdAtom>, keep_hetero: bool) -> Vec<PdAtom> {
+    let mut residue_altloc_scores: HashMap<(String, i32, Option<char>, bool), HashMap<char, (f64, usize)>> =
+        HashMap::new();
+
+    for atom in &atoms {
+        if atom.is_hetatm && !keep_hetero {
+            continue;
+        }
+        if let Some(alt_loc) = atom.alt_loc {
+            let residue_key = (
+                atom.chain_id.clone(),
+                atom.residue_seq,
+                atom.ins_code,
+                atom.is_hetatm,
+            );
+            let entry = residue_altloc_scores.entry(residue_key).or_default();
+            let score = entry.entry(alt_loc).or_insert((0.0, 0));
+            score.0 += atom.occupancy;
+            score.1 += 1;
+        }
+    }
+
+    let selected_altlocs: HashMap<(String, i32, Option<char>, bool), char> = residue_altloc_scores
+        .into_iter()
+        .filter_map(|(residue_key, choices)| {
+            choices
+                .into_iter()
+                .max_by(|left, right| {
+                    left.1
+                        .0
+                        .partial_cmp(&right.1 .0)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then_with(|| left.1 .1.cmp(&right.1 .1))
+                        .then_with(|| left.0.cmp(&right.0))
+                })
+                .map(|(alt_loc, _)| (residue_key, alt_loc))
+        })
+        .collect();
+
+    atoms
+        .into_iter()
+        .filter(|atom| !atom.is_hetatm || keep_hetero)
+        .filter(|atom| {
+            let residue_key = (
+                atom.chain_id.clone(),
+                atom.residue_seq,
+                atom.ins_code,
+                atom.is_hetatm,
+            );
+            match atom.alt_loc {
+                None => true,
+                Some(alt_loc) => selected_altlocs
+                    .get(&residue_key)
+                    .map(|selected| *selected == alt_loc)
+                    .unwrap_or(true),
+            }
+        })
+        .collect()
+}
+
+fn structure_id_from_path(path: &str) -> String {
+    let mut name = Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("structure")
+        .to_string();
+
+    for suffix in [".pdb.gz", ".cif.gz", ".mmcif.gz", ".bcif.gz", ".pdb", ".ent", ".cif", ".mmcif", ".bcif"] {
+        if name.to_ascii_lowercase().ends_with(suffix) {
+            let new_len = name.len().saturating_sub(suffix.len());
+            name.truncate(new_len);
+            break;
+        }
+    }
+
+    if name.is_empty() {
+        "structure".to_string()
+    } else {
+        name
+    }
+}
+
+fn normalize_string<T: Into<String>>(value: Option<T>) -> Option<String> {
+    value
+        .map(Into::into)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn is_gzip_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_ascii_lowercase().ends_with(".gz"))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::fs;
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     const PDB_SAMPLE: &str = "\
 ATOM      1  N   GLY A   1      11.104  13.207   8.292  1.00 20.00           N
@@ -391,5 +344,41 @@ ATOM 3 C C GLY A 2 13.100 12.800 8.900
         assert_eq!(summary.chain_count, 1);
         assert_eq!(summary.residue_count, 2);
         assert_eq!(summary.atom_count, 3);
+    }
+
+    #[test]
+    fn keeps_highest_occupancy_altloc_per_residue() {
+        let pdb = "\
+ATOM      1  CA AGLY A   1      11.104  13.207   8.292  0.40 20.00           C
+ATOM      2  CA BGLY A   1      21.000  23.000  18.000  0.60 20.00           C
+ATOM      3  N   GLY A   1      12.000  12.500   8.000  1.00 20.00           N
+";
+        let structure = parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
+        let residue = &structure.chains[0].residues[0];
+        assert_eq!(residue.atoms.len(), 2);
+        let ca = residue.atoms.iter().find(|atom| atom.name == "CA").unwrap();
+        assert_eq!(ca.x, 21.0);
+    }
+
+    #[test]
+    fn parses_gzip_pdb_file() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("structscope-core-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("demo.pdb.gz");
+
+        let file = fs::File::create(&path).unwrap();
+        let mut encoder = GzEncoder::new(file, Compression::default());
+        encoder.write_all(PDB_SAMPLE.as_bytes()).unwrap();
+        encoder.finish().unwrap();
+
+        let structure = parse_file(&path, ParseOptions::default()).unwrap();
+        assert_eq!(structure.summary().atom_count, 4);
+
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
     }
 }
