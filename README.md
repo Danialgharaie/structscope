@@ -5,7 +5,7 @@
 This repository currently contains a bootstrap implementation with:
 
 - workspace scaffolding for all planned crates
-- crate-backed PDB and mmCIF parsing with gzip input support
+- crate-backed PDB, mmCIF, and BinaryCIF parsing with gzip input support
 - canonical structure normalization
 - residue, atom, and interface graph construction (GraphML export)
 - basic and graph-derived feature extraction
@@ -25,5 +25,4 @@ Feature records are exposed to SQL as a `features` table.
 
 Current limitations:
 
-- BinaryCIF is not implemented yet
 - the eBPF guard crate is scaffolded only

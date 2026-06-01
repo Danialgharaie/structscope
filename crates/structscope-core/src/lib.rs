@@ -1,3 +1,4 @@
+mod bcif;
 mod model;
 mod parser;
 

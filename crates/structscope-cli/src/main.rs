@@ -258,6 +258,8 @@ fn is_supported_file(path: &Path) -> bool {
                 || name.ends_with(".pdb.gz")
                 || name.ends_with(".cif.gz")
                 || name.ends_with(".mmcif.gz")
+                || name.ends_with(".bcif")
+                || name.ends_with(".bcif.gz")
         })
         .unwrap_or(false)
 }

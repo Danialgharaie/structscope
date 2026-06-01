@@ -71,3 +71,20 @@ fn assert_parses(path: &Path, label: &str) {
     );
     assert!(summary.atom_count > 0, "{label} fixture has no atoms: {}", path.display());
 }
+
+#[test]
+fn bcif_matches_mmcif_summary() {
+    let root = corpus_root();
+    for id in ["100d", "1nkd"] {
+        let bcif = parse_file(&root.join(format!("bcif/{id}.bcif")), ParseOptions::default())
+            .unwrap_or_else(|err| panic!("failed to parse {id}.bcif: {err}"))
+            .summary();
+        let mmcif = parse_file(&root.join(format!("mmcif/{id}.cif.gz")), ParseOptions::default())
+            .unwrap_or_else(|err| panic!("failed to parse {id}.cif.gz: {err}"))
+            .summary();
+        assert_eq!(bcif.chain_count, mmcif.chain_count, "{id} chains");
+        assert_eq!(bcif.residue_count, mmcif.residue_count, "{id} residues");
+        assert_eq!(bcif.atom_count, mmcif.atom_count, "{id} atoms");
+        assert_eq!(bcif.heteroatom_count, mmcif.heteroatom_count, "{id} heteroatoms");
+    }
+}

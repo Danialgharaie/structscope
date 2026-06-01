@@ -7,6 +7,46 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use thiserror::Error;
 
+use crate::bcif;
+
+/// Format-neutral atom record that both the pdbrust and BinaryCIF paths feed into.
+#[derive(Debug, Clone)]
+struct RawAtom {
+    serial: i32,
+    name: String,
+    alt_loc: Option<char>,
+    residue_name: String,
+    chain_id: String,
+    residue_seq: i32,
+    x: f64,
+    y: f64,
+    z: f64,
+    occupancy: f64,
+    element: String,
+    ins_code: Option<char>,
+    is_hetatm: bool,
+}
+
+impl From<PdAtom> for RawAtom {
+    fn from(a: PdAtom) -> Self {
+        Self {
+            serial: a.serial,
+            name: a.name,
+            alt_loc: a.alt_loc,
+            residue_name: a.residue_name,
+            chain_id: a.chain_id,
+            residue_seq: a.residue_seq,
+            x: a.x,
+            y: a.y,
+            z: a.z,
+            occupancy: a.occupancy,
+            element: a.element,
+            ins_code: a.ins_code,
+            is_hetatm: a.is_hetatm,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct ParseOptions {
     pub keep_hetero: bool,
@@ -39,9 +79,9 @@ pub fn parse_file(path: &Path, options: ParseOptions) -> Result<Structure, Parse
     let format = detect_format(path)?;
     let source_path = Some(path.display().to_string());
     if matches!(format, InputFormat::BinaryCif) {
-        return Err(ParseError::UnsupportedFormat(
-            "BinaryCIF input is not implemented yet".to_string(),
-        ));
+        let raw = std::fs::read(path)?;
+        let bytes = if is_gzip_path(path) { gunzip(&raw)? } else { raw };
+        return parse_bcif_bytes(&bytes, source_path, options);
     }
     let parsed = if is_gzip_path(path) {
         parse_gzip_structure_file(path).map_err(|err| ParseError::Invalid(err.to_string()))?
@@ -60,13 +100,76 @@ pub fn parse_str(
     let parsed = match format {
         InputFormat::Pdb => parse_pdb_string(contents).map_err(|err| ParseError::Invalid(err.to_string()))?,
         InputFormat::Mmcif => parse_mmcif_string(contents).map_err(|err| ParseError::Invalid(err.to_string()))?,
-        InputFormat::BinaryCif => {
-            return Err(ParseError::UnsupportedFormat(
-                "BinaryCIF input is not implemented yet".to_string(),
-            ))
-        }
+        InputFormat::BinaryCif => return parse_bcif_bytes(contents.as_bytes(), source_path, options),
     };
     convert_structure(parsed, format, source_path, options)
+}
+
+fn gunzip(bytes: &[u8]) -> Result<Vec<u8>, ParseError> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    flate2::read::GzDecoder::new(bytes)
+        .read_to_end(&mut out)
+        .map_err(|err| ParseError::Invalid(format!("gzip: {err}")))?;
+    Ok(out)
+}
+
+/// Decode a BinaryCIF buffer's atom_site category into a Structure.
+fn parse_bcif_bytes(bytes: &[u8], source_path: Option<String>, options: ParseOptions) -> Result<Structure, ParseError> {
+    let categories = bcif::decode_first_block(bytes).map_err(|err| ParseError::Invalid(err.to_string()))?;
+    let atom_site = categories
+        .iter()
+        .find(|c| c.name == "atom_site")
+        .ok_or_else(|| ParseError::Invalid("no atom_site category in BinaryCIF".to_string()))?;
+    let title = categories
+        .iter()
+        .find(|c| c.name == "struct")
+        .and_then(|c| c.column("title"))
+        .and_then(|col| col.as_str(0));
+
+    let atoms = bcif_atoms(atom_site);
+    build_structure(atoms, InputFormat::BinaryCif, source_path, title, options)
+}
+
+/// Map the atom_site columns onto format-neutral RawAtoms, preferring author-assigned fields.
+fn bcif_atoms(cat: &bcif::Category) -> Vec<RawAtom> {
+    let col = |name: &str| cat.column(name);
+    let pick = |a: &str, b: &str| col(a).or_else(|| col(b));
+
+    let group = col("group_PDB");
+    let chain = pick("label_asym_id", "auth_asym_id");
+    let seq = pick("auth_seq_id", "label_seq_id");
+    let comp = pick("auth_comp_id", "label_comp_id");
+    let atom = pick("auth_atom_id", "label_atom_id");
+    let alt = col("label_alt_id");
+    let ins = col("pdbx_PDB_ins_code");
+    let (x, y, z) = (col("Cartn_x"), col("Cartn_y"), col("Cartn_z"));
+    let occ = col("occupancy");
+    let sym = col("type_symbol");
+    let id = col("id");
+
+    (0..cat.row_count)
+        .map(|i| {
+            let one_char = |c: Option<&bcif::ColumnData>| {
+                c.and_then(|d| d.as_str(i)).and_then(|s| s.trim().chars().next())
+            };
+            RawAtom {
+                serial: id.and_then(|d| d.as_i64(i)).unwrap_or((i + 1) as i64) as i32,
+                name: atom.and_then(|d| d.as_str(i)).unwrap_or_default(),
+                alt_loc: one_char(alt),
+                residue_name: comp.and_then(|d| d.as_str(i)).unwrap_or_default(),
+                chain_id: chain.and_then(|d| d.as_str(i)).unwrap_or_default(),
+                residue_seq: seq.and_then(|d| d.as_i64(i)).unwrap_or(0) as i32,
+                x: x.and_then(|d| d.as_f64(i)).unwrap_or(0.0),
+                y: y.and_then(|d| d.as_f64(i)).unwrap_or(0.0),
+                z: z.and_then(|d| d.as_f64(i)).unwrap_or(0.0),
+                occupancy: occ.and_then(|d| d.as_f64(i)).unwrap_or(1.0),
+                element: sym.and_then(|d| d.as_str(i)).unwrap_or_default(),
+                ins_code: one_char(ins),
+                is_hetatm: group.and_then(|d| d.as_str(i)).map(|g| g.trim() == "HETATM").unwrap_or(false),
+            }
+        })
+        .collect()
 }
 
 fn detect_format(path: &Path) -> Result<InputFormat, ParseError> {
@@ -97,6 +200,18 @@ fn convert_structure(
     source_path: Option<String>,
     options: ParseOptions,
 ) -> Result<Structure, ParseError> {
+    let title = parsed.title.or(parsed.header);
+    let atoms = parsed.atoms.into_iter().map(RawAtom::from).collect();
+    build_structure(atoms, format, source_path, title, options)
+}
+
+fn build_structure(
+    atoms: Vec<RawAtom>,
+    format: InputFormat,
+    source_path: Option<String>,
+    title: Option<String>,
+    options: ParseOptions,
+) -> Result<Structure, ParseError> {
     let source_format = match format {
         InputFormat::Pdb => "pdb",
         InputFormat::Mmcif => "mmcif",
@@ -107,8 +222,8 @@ fn convert_structure(
         .map(structure_id_from_path)
         .unwrap_or_else(|| "structure".to_string());
 
-    let filtered_atoms = retain_selected_altlocs(parsed.atoms, options.keep_hetero);
-    let mut chains_map: BTreeMap<String, BTreeMap<(i32, String, bool), Vec<PdAtom>>> = BTreeMap::new();
+    let filtered_atoms = retain_selected_altlocs(atoms, options.keep_hetero);
+    let mut chains_map: BTreeMap<String, BTreeMap<(i32, String, bool), Vec<RawAtom>>> = BTreeMap::new();
 
     for atom in filtered_atoms {
         let chain_key = if atom.chain_id.trim().is_empty() {
@@ -190,13 +305,13 @@ fn convert_structure(
         metadata: StructureMetadata {
             source_format: source_format.to_string(),
             source_path,
-            title: parsed.title.or(parsed.header),
+            title,
         },
         chains,
     })
 }
 
-fn retain_selected_altlocs(atoms: Vec<PdAtom>, keep_hetero: bool) -> Vec<PdAtom> {
+fn retain_selected_altlocs(atoms: Vec<RawAtom>, keep_hetero: bool) -> Vec<RawAtom> {
     let mut residue_altloc_scores: HashMap<(String, i32, Option<char>, bool), HashMap<char, (f64, usize)>> =
         HashMap::new();
 
