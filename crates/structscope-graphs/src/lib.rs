@@ -1,5 +1,6 @@
-use petgraph::graph::UnGraph;
+use petgraph::graph::{NodeIndex, UnGraph};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use structscope_core::{Residue, Structure};
 
 #[derive(Debug, Clone, Copy)]
@@ -18,12 +19,22 @@ pub struct ResidueNode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AtomNode {
+    pub atom_id: String,
+    pub residue_id: String,
+    pub chain_id: String,
+    pub atom_name: String,
+    pub element: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContactEdge {
     pub distance: f64,
     pub kind: String,
 }
 
 pub type ResidueGraph = UnGraph<ResidueNode, ContactEdge>;
+pub type AtomGraph = UnGraph<AtomNode, ContactEdge>;
 
 pub fn build_residue_graph(structure: &Structure, threshold_angstroms: f64) -> ResidueGraph {
     let mut graph = ResidueGraph::default();
@@ -79,7 +90,107 @@ pub fn build_residue_graph(structure: &Structure, threshold_angstroms: f64) -> R
     graph
 }
 
-pub fn export_graphml(graph: &ResidueGraph) -> String {
+/// Residue graph containing only inter-chain contacts. Residues without an
+/// interface contact are omitted so the graph represents the interface itself.
+pub fn build_interface_graph(structure: &Structure, threshold_angstroms: f64) -> ResidueGraph {
+    let residues: Vec<(&str, &Residue)> = structure
+        .chains
+        .iter()
+        .flat_map(|chain| chain.residues.iter().map(move |residue| (chain.id.as_str(), residue)))
+        .collect();
+
+    let mut graph = ResidueGraph::default();
+    let mut node_index: HashMap<usize, NodeIndex> = HashMap::new();
+    let ensure_node = |graph: &mut ResidueGraph, map: &mut HashMap<usize, NodeIndex>, i: usize| -> NodeIndex {
+        *map.entry(i).or_insert_with(|| {
+            let (chain_id, residue) = residues[i];
+            graph.add_node(ResidueNode {
+                residue_id: residue.id.clone(),
+                chain_id: chain_id.to_string(),
+                residue_name: residue.name.clone(),
+                seq_number: residue.seq_number,
+            })
+        })
+    };
+
+    for left in 0..residues.len() {
+        for right in (left + 1)..residues.len() {
+            if residues[left].0 == residues[right].0 {
+                continue;
+            }
+            let distance = residue_distance(residues[left].1, residues[right].1);
+            if distance <= threshold_angstroms {
+                let a = ensure_node(&mut graph, &mut node_index, left);
+                let b = ensure_node(&mut graph, &mut node_index, right);
+                graph.add_edge(a, b, ContactEdge { distance, kind: "interface_contact".to_string() });
+            }
+        }
+    }
+
+    graph
+}
+
+/// Atom-level contact graph using a spatial grid to find pairs within the threshold.
+pub fn build_atom_graph(structure: &Structure, threshold_angstroms: f64) -> AtomGraph {
+    let mut graph = AtomGraph::default();
+    let mut points = Vec::new();
+    let mut indices = Vec::new();
+
+    for chain in &structure.chains {
+        for residue in &chain.residues {
+            for atom in &residue.atoms {
+                let index = graph.add_node(AtomNode {
+                    atom_id: atom.id.clone(),
+                    residue_id: residue.id.clone(),
+                    chain_id: chain.id.clone(),
+                    atom_name: atom.name.clone(),
+                    element: atom.element.clone().unwrap_or_default(),
+                });
+                points.push((atom.x, atom.y, atom.z));
+                indices.push(index);
+            }
+        }
+    }
+
+    for (i, j, distance) in grid_pairs(&points, threshold_angstroms) {
+        graph.add_edge(indices[i], indices[j], ContactEdge { distance, kind: "distance_contact".to_string() });
+    }
+
+    graph
+}
+
+/// Node types that can be serialized to GraphML.
+pub trait GraphmlNode {
+    fn graphml_id(&self) -> &str;
+    fn graphml_attrs(&self) -> Vec<(&'static str, String)>;
+}
+
+impl GraphmlNode for ResidueNode {
+    fn graphml_id(&self) -> &str {
+        &self.residue_id
+    }
+    fn graphml_attrs(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("residue_name", self.residue_name.clone()),
+            ("seq_number", self.seq_number.to_string()),
+        ]
+    }
+}
+
+impl GraphmlNode for AtomNode {
+    fn graphml_id(&self) -> &str {
+        &self.atom_id
+    }
+    fn graphml_attrs(&self) -> Vec<(&'static str, String)> {
+        vec![
+            ("atom_name", self.atom_name.clone()),
+            ("element", self.element.clone()),
+            ("residue_id", self.residue_id.clone()),
+        ]
+    }
+}
+
+pub fn export_graphml<N: GraphmlNode>(graph: &UnGraph<N, ContactEdge>) -> String {
     let mut out = String::from(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
@@ -88,21 +199,59 @@ pub fn export_graphml(graph: &ResidueGraph) -> String {
     );
     for node_idx in graph.node_indices() {
         let node = &graph[node_idx];
-        out.push_str(&format!(
-            "    <node id=\"{}\"><data key=\"residue_name\">{}</data><data key=\"seq_number\">{}</data></node>\n",
-            node.residue_id, node.residue_name, node.seq_number
-        ));
+        out.push_str(&format!("    <node id=\"{}\">", node.graphml_id()));
+        for (key, value) in node.graphml_attrs() {
+            out.push_str(&format!("<data key=\"{key}\">{value}</data>"));
+        }
+        out.push_str("</node>\n");
     }
     for edge_idx in graph.edge_indices() {
         let (source, target) = graph.edge_endpoints(edge_idx).expect("edge endpoints");
         let edge = &graph[edge_idx];
         out.push_str(&format!(
             "    <edge source=\"{}\" target=\"{}\"><data key=\"kind\">{}</data><data key=\"distance\">{:.3}</data></edge>\n",
-            graph[source].residue_id, graph[target].residue_id, edge.kind, edge.distance
+            graph[source].graphml_id(), graph[target].graphml_id(), edge.kind, edge.distance
         ));
     }
     out.push_str("  </graph>\n</graphml>\n");
     out
+}
+
+/// Return index pairs (i < j) whose points lie within `threshold` using cell hashing.
+fn grid_pairs(points: &[(f64, f64, f64)], threshold: f64) -> Vec<(usize, usize, f64)> {
+    let cell = threshold.max(f64::MIN_POSITIVE);
+    let key = |p: &(f64, f64, f64)| {
+        ((p.0 / cell).floor() as i64, (p.1 / cell).floor() as i64, (p.2 / cell).floor() as i64)
+    };
+    let mut cells: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
+    for (i, p) in points.iter().enumerate() {
+        cells.entry(key(p)).or_default().push(i);
+    }
+
+    let t2 = threshold * threshold;
+    let mut pairs = Vec::new();
+    for (i, p) in points.iter().enumerate() {
+        let (cx, cy, cz) = key(p);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(bucket) = cells.get(&(cx + dx, cy + dy, cz + dz)) {
+                        for &j in bucket {
+                            if j <= i {
+                                continue;
+                            }
+                            let q = &points[j];
+                            let d2 = (p.0 - q.0).powi(2) + (p.1 - q.1).powi(2) + (p.2 - q.2).powi(2);
+                            if d2 <= t2 {
+                                pairs.push((i, j, d2.sqrt()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    pairs
 }
 
 fn are_sequential_neighbors(left: &Residue, right: &Residue) -> bool {
@@ -132,4 +281,48 @@ fn residue_centroid(residue: &Residue) -> (f64, f64, f64) {
         sum_z += atom.z;
     }
     (sum_x / count, sum_y / count, sum_z / count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use structscope_core::{parse_str, InputFormat, ParseOptions};
+
+    const ATOMS: &str = "\
+ATOM      1  N   GLY A   1      11.104  13.207   8.292  1.00 20.00           N
+ATOM      2  CA  GLY A   1      12.000  12.500   8.000  1.00 20.00           C
+ATOM      3  C   GLY A   2      13.100  12.800   8.900  1.00 20.00           C
+";
+
+    const TWO_CHAIN: &str = "\
+ATOM      1  CA  GLY A   1       0.000   0.000   0.000  1.00 0.00           C
+ATOM      2  CA  GLY A   2       1.000   0.000   0.000  1.00 0.00           C
+ATOM      3  CA  ALA B   1       2.000   0.000   0.000  1.00 0.00           C
+";
+
+    fn parse(pdb: &str) -> Structure {
+        parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap()
+    }
+
+    #[test]
+    fn atom_graph_has_node_per_atom_and_contacts() {
+        let graph = build_atom_graph(&parse(ATOMS), 5.0);
+        assert_eq!(graph.node_count(), 3);
+        assert_eq!(graph.edge_count(), 3); // all three atoms within 5A
+    }
+
+    #[test]
+    fn interface_graph_only_inter_chain() {
+        let graph = build_interface_graph(&parse(TWO_CHAIN), 8.0);
+        // A:1-B:1 and A:2-B:1 cross the interface; A:1-A:2 is intra-chain and excluded.
+        assert_eq!(graph.edge_count(), 2);
+        assert_eq!(graph.node_count(), 3);
+    }
+
+    #[test]
+    fn interface_graph_empty_for_single_chain() {
+        let graph = build_interface_graph(&parse(ATOMS), 8.0);
+        assert_eq!(graph.edge_count(), 0);
+        assert_eq!(graph.node_count(), 0);
+    }
 }

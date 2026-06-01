@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use structscope_core::Structure;
-use structscope_graphs::build_residue_graph;
+use structscope_graphs::{build_interface_graph, build_residue_graph};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureRecord {
@@ -13,6 +13,7 @@ pub struct FeatureRecord {
 pub fn compute_features(structure: &Structure) -> FeatureRecord {
     let summary = structure.summary();
     let residue_graph = build_residue_graph(structure, 8.0);
+    let interface_graph = build_interface_graph(structure, 8.0);
 
     let mut features = Map::new();
     features.insert("atom_count".to_string(), json!(summary.atom_count));
@@ -21,6 +22,8 @@ pub fn compute_features(structure: &Structure) -> FeatureRecord {
     features.insert("ligand_count".to_string(), json!(summary.ligand_count));
     features.insert("heteroatom_count".to_string(), json!(summary.heteroatom_count));
     features.insert("contact_count".to_string(), json!(residue_graph.edge_count()));
+    features.insert("interface_contact_count".to_string(), json!(interface_graph.edge_count()));
+    features.insert("interface_residue_count".to_string(), json!(interface_graph.node_count()));
     features.insert("radius_of_gyration".to_string(), json!(radius_of_gyration(structure)));
     features.insert("centroid".to_string(), json!(structure_centroid(structure)));
     features.insert(

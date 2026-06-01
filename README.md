@@ -7,7 +7,7 @@ This repository currently contains a bootstrap implementation with:
 - workspace scaffolding for all planned crates
 - crate-backed PDB and mmCIF parsing with gzip input support
 - canonical structure normalization
-- residue-graph construction
+- residue, atom, and interface graph construction (GraphML export)
 - basic and graph-derived feature extraction
 - JSONL and Parquet feature export
 - DuckDB-backed SQL querying over feature Parquet (build with `--features duckdb`)

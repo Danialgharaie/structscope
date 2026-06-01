@@ -7,7 +7,7 @@ use structscope_agent::guard_available;
 use structscope_core::{parse_file, ParseOptions, Structure};
 use structscope_events::Event;
 use structscope_features::compute_features;
-use structscope_graphs::{build_residue_graph, export_graphml};
+use structscope_graphs::{build_atom_graph, build_interface_graph, build_residue_graph, export_graphml};
 use structscope_provenance::{inspect_sqlite, ProvenanceConfig, ProvenanceRecorder};
 use structscope_store::{normalize_output_path, run_query, write_feature_records};
 use walkdir::WalkDir;
@@ -197,17 +197,18 @@ fn cmd_featurize(
 }
 
 fn cmd_graph(input: &Path, graph_type: &str, format: &str, out: Option<PathBuf>) -> Result<()> {
-    if graph_type != "residue" {
-        anyhow::bail!("only residue graph export is implemented in this bootstrap slice");
-    }
     if format != "graphml" {
         anyhow::bail!("only graphml export is implemented in this bootstrap slice");
     }
 
     let structure = parse_file(input, ParseOptions::default())?;
-    let graph = build_residue_graph(&structure, 8.0);
-    let graphml = export_graphml(&graph);
-    let out_path = normalize_output_path(out, &format!("{}.graphml", structure.id));
+    let graphml = match graph_type {
+        "residue" => export_graphml(&build_residue_graph(&structure, 8.0)),
+        "interface" => export_graphml(&build_interface_graph(&structure, 8.0)),
+        "atom" => export_graphml(&build_atom_graph(&structure, 5.0)),
+        other => anyhow::bail!("unknown graph type '{other}' (expected residue, atom, or interface)"),
+    };
+    let out_path = normalize_output_path(out, &format!("{}.{}.graphml", structure.id, graph_type));
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
