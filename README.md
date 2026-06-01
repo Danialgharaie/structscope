@@ -27,3 +27,10 @@ Feature records are exposed to SQL as a `features` table.
 Current limitations:
 
 - the eBPF guard crate is scaffolded only
+
+## Documentation
+
+- [CLI usage](docs/cli.md) — commands and examples
+- [Architecture](docs/architecture.md) — crate layout
+- [Changelog](CHANGELOG.md)
+
