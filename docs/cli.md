@@ -48,6 +48,9 @@ structscope rmsd ref.pdb mobile.pdb --atoms ca       # or: backbone, all
 
 # Different-length but related structures (sequence-aligned CA atoms):
 structscope rmsd ref.pdb mobile.pdb --align
+
+# Partial or domain-level overlap (local Smith-Waterman alignment):
+structscope rmsd ref.pdb fragment.pdb --local
 ```
 
 Without `--align`, the two selections must have equal atom counts; the error

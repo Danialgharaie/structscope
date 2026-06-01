@@ -4,7 +4,7 @@ use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 use structscope_agent::guard_available;
-use structscope_core::{kabsch, needleman_wunsch, parse_file, three_to_one, ParseOptions, Structure};
+use structscope_core::{kabsch, needleman_wunsch, parse_file, smith_waterman, three_to_one, ParseOptions, Structure};
 use structscope_events::Event;
 use structscope_features::{compute_features, per_residue::per_residue_features};
 use structscope_graphs::{build_atom_graph, build_interface_graph, build_residue_graph, export_graphml};
@@ -66,6 +66,10 @@ enum Commands {
         /// allows structures of different lengths.
         #[arg(long)]
         align: bool,
+        /// Like --align but uses local (Smith-Waterman) alignment for partial
+        /// or domain-level overlaps.
+        #[arg(long)]
+        local: bool,
     },
     /// Emit per-residue features (SASA, secondary structure, dihedrals) as JSONL.
     Residues {
@@ -108,7 +112,7 @@ fn main() -> Result<()> {
             println!("{}", run_query(&input, &sql)?);
             Ok(())
         }
-        Commands::Rmsd { reference, mobile, atoms, align } => cmd_rmsd(&reference, &mobile, &atoms, align),
+        Commands::Rmsd { reference, mobile, atoms, align, local } => cmd_rmsd(&reference, &mobile, &atoms, align, local),
         Commands::Residues { input, out } => cmd_residues(&input, out),
         Commands::Provenance { sqlite } => cmd_provenance(&sqlite),
     }
@@ -240,11 +244,11 @@ fn cmd_graph(input: &Path, graph_type: &str, format: &str, out: Option<PathBuf>)
     Ok(())
 }
 
-fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str, align: bool) -> Result<()> {
+fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str, align: bool, local: bool) -> Result<()> {
     let reference_structure = parse_file(reference, ParseOptions::default())?;
     let mobile_structure = parse_file(mobile, ParseOptions::default())?;
 
-    let (ref_coords, mob_coords) = if align {
+    let (ref_coords, mob_coords) = if align || local {
         // Residue-level correspondence: align one-letter sequences, pair matched CA atoms.
         let residues = |s: &Structure| -> (Vec<u8>, Vec<[f64; 3]>) {
             let mut seq = Vec::new();
@@ -259,7 +263,11 @@ fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str, align: bool) -> Result
         };
         let (ref_seq, ref_ca) = residues(&reference_structure);
         let (mob_seq, mob_ca) = residues(&mobile_structure);
-        let pairs = needleman_wunsch(&ref_seq, &mob_seq);
+        let pairs = if local {
+            smith_waterman(&ref_seq, &mob_seq)
+        } else {
+            needleman_wunsch(&ref_seq, &mob_seq)
+        };
         let matched: Vec<(usize, usize)> = pairs.into_iter().filter(|&(i, j)| ref_seq[i] == mob_seq[j]).collect();
         if matched.is_empty() {
             anyhow::bail!("no matching residues found between the two structures");
@@ -295,7 +303,13 @@ fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str, align: bool) -> Result
     };
 
     let sp = kabsch(&mob_coords, &ref_coords).context("superposition failed (empty selection?)")?;
-    let mode = if align { "aligned-ca" } else { atoms };
+    let mode = if local {
+        "local-ca"
+    } else if align {
+        "aligned-ca"
+    } else {
+        atoms
+    };
     println!("rmsd={:.4}; atoms={}; selection={mode}", sp.rmsd, ref_coords.len());
     Ok(())
 }
