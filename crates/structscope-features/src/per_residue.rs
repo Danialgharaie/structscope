@@ -12,6 +12,9 @@ pub struct ResidueFeature {
     pub residue_name: String,
     pub seq_number: i32,
     pub sasa: f64,
+    /// Relative solvent accessibility: sasa / max-ASA for the residue type.
+    /// `None` for non-standard residues with no reference area.
+    pub rsa: Option<f64>,
     pub secondary_structure: char,
     pub phi: Option<f64>,
     pub psi: Option<f64>,
@@ -36,12 +39,14 @@ pub fn per_residue_features(structure: &Structure) -> Vec<ResidueFeature> {
                 atom_i += 1;
             }
             let d = &dihedrals[res_i];
+            let rsa = crate::sasa::max_accessible_area(&residue.name).map(|max| res_sasa / max);
             out.push(ResidueFeature {
                 residue_id: residue.id.clone(),
                 chain_id: chain.id.clone(),
                 residue_name: residue.name.clone(),
                 seq_number: residue.seq_number,
                 sasa: res_sasa,
+                rsa,
                 secondary_structure: ss_chars[ri],
                 phi: d.phi,
                 psi: d.psi,
@@ -74,5 +79,8 @@ ATOM      6  C   GLY A   2       5.480   2.700   0.000  1.00 0.00           C
         assert_eq!(feats[0].residue_name, "ALA");
         assert_eq!(feats[1].seq_number, 2);
         assert!(feats.iter().all(|f| f.sasa >= 0.0));
+        // RSA is defined for standard residues and non-negative.
+        assert!(feats.iter().all(|f| f.rsa.map(|v| v >= 0.0).unwrap_or(true)));
+        assert!(feats[0].rsa.is_some(), "ALA should have a reference max-ASA");
     }
 }
