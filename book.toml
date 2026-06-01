@@ -1,0 +1,10 @@
+[book]
+title = "structscope"
+description = "Rust-native structural bioinformatics toolkit"
+authors = ["structscope contributors"]
+src = "docs"
+language = "en"
+
+[output.html]
+default-theme = "rust"
+git-repository-url = "https://github.com/Danialgharaie/structscope"
