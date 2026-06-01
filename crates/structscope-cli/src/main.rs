@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use structscope_agent::guard_available;
 use structscope_core::{kabsch, parse_file, ParseOptions, Structure};
 use structscope_events::Event;
-use structscope_features::compute_features;
+use structscope_features::{compute_features, per_residue::per_residue_features};
 use structscope_graphs::{build_atom_graph, build_interface_graph, build_residue_graph, export_graphml};
 use structscope_provenance::{inspect_sqlite, ProvenanceConfig, ProvenanceRecorder};
 use structscope_store::{normalize_output_path, run_query, write_feature_records};
@@ -63,6 +63,13 @@ enum Commands {
         #[arg(long, default_value = "ca")]
         atoms: String,
     },
+    /// Emit per-residue features (SASA, secondary structure, dihedrals) as JSONL.
+    Residues {
+        input: PathBuf,
+        /// Optional output file; defaults to stdout.
+        #[arg(long)]
+        out: Option<PathBuf>,
+    },
     Provenance {
         sqlite: PathBuf,
     },
@@ -98,6 +105,7 @@ fn main() -> Result<()> {
             Ok(())
         }
         Commands::Rmsd { reference, mobile, atoms } => cmd_rmsd(&reference, &mobile, &atoms),
+        Commands::Residues { input, out } => cmd_residues(&input, out),
         Commands::Provenance { sqlite } => cmd_provenance(&sqlite),
     }
 }
@@ -257,6 +265,23 @@ fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str) -> Result<()> {
     }
     let sp = kabsch(&mob_coords, &ref_coords).context("superposition failed (empty selection?)")?;
     println!("rmsd={:.4}; atoms={}; selection={atoms}", sp.rmsd, ref_coords.len());
+    Ok(())
+}
+
+fn cmd_residues(input: &Path, out: Option<PathBuf>) -> Result<()> {
+    let structure = parse_file(input, ParseOptions::default())?;
+    let mut lines = String::new();
+    for feature in per_residue_features(&structure) {
+        lines.push_str(&serde_json::to_string(&feature)?);
+        lines.push('\n');
+    }
+    match out {
+        Some(path) => {
+            fs::write(&path, lines).with_context(|| format!("failed to write {}", path.display()))?;
+            println!("{}", path.display());
+        }
+        None => print!("{lines}"),
+    }
     Ok(())
 }
 

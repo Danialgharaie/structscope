@@ -13,7 +13,7 @@ This repository currently contains a bootstrap implementation with:
 - JSONL and Parquet feature export
 - DuckDB-backed SQL querying over feature Parquet (build with `--features duckdb`)
 - optional SQLite/JSONL provenance
-- CLI entrypoints for parse, featurize, graph, query, rmsd, and provenance
+- CLI entrypoints for parse, featurize, graph, query, rmsd, residues, and provenance
 
 Querying is gated behind a Cargo feature because it bundles DuckDB:
 

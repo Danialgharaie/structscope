@@ -5,6 +5,7 @@ use structscope_graphs::{build_interface_graph, build_residue_graph};
 
 pub mod dihedral;
 pub mod interactions;
+pub mod per_residue;
 pub mod sasa;
 pub mod ss;
 
