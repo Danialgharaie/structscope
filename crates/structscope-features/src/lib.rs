@@ -32,6 +32,11 @@ pub fn compute_features(structure: &Structure) -> FeatureRecord {
     features.insert("interface_residue_count".to_string(), json!(interface_graph.node_count()));
     features.insert("radius_of_gyration".to_string(), json!(radius_of_gyration(structure)));
     features.insert("sasa_total".to_string(), json!(sasa::total_sasa(structure)));
+    // Buried vs exposed by relative accessibility (standard 25% cutoff); residues
+    // without a reference area (non-standard) are excluded from both counts.
+    let rsa: Vec<f64> = per_residue::per_residue_features(structure).iter().filter_map(|r| r.rsa).collect();
+    features.insert("buried_residue_count".to_string(), json!(rsa.iter().filter(|&&v| v < 0.25).count()));
+    features.insert("exposed_residue_count".to_string(), json!(rsa.iter().filter(|&&v| v >= 0.25).count()));
     let ss_all: String = ss::secondary_structure(structure).iter().map(|c| c.ss.clone()).collect();
     features.insert(
         "helix_residue_count".to_string(),
