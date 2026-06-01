@@ -8,6 +8,7 @@ This repository currently contains a bootstrap implementation with:
 - crate-backed PDB, mmCIF, and BinaryCIF parsing with gzip input support
 - canonical structure normalization
 - residue, atom, and interface graph construction (GraphML export)
+- structural primitives: solvent accessible surface area (Shrake-Rupley), DSSP-style secondary structure, backbone dihedrals, optimal superposition/RMSD (Kabsch), and typed interactions (disulfides, salt bridges, hydrogen bonds)
 - basic and graph-derived feature extraction
 - JSONL and Parquet feature export
 - DuckDB-backed SQL querying over feature Parquet (build with `--features duckdb`)

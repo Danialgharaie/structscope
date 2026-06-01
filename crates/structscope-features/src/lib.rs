@@ -3,6 +3,11 @@ use serde_json::{json, Map, Value};
 use structscope_core::Structure;
 use structscope_graphs::{build_interface_graph, build_residue_graph};
 
+pub mod dihedral;
+pub mod interactions;
+pub mod sasa;
+pub mod ss;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureRecord {
     pub structure_id: String,
@@ -25,6 +30,27 @@ pub fn compute_features(structure: &Structure) -> FeatureRecord {
     features.insert("interface_contact_count".to_string(), json!(interface_graph.edge_count()));
     features.insert("interface_residue_count".to_string(), json!(interface_graph.node_count()));
     features.insert("radius_of_gyration".to_string(), json!(radius_of_gyration(structure)));
+    features.insert("sasa_total".to_string(), json!(sasa::total_sasa(structure)));
+    let ss_all: String = ss::secondary_structure(structure).iter().map(|c| c.ss.clone()).collect();
+    features.insert(
+        "helix_residue_count".to_string(),
+        json!(ss_all.chars().filter(|c| matches!(c, 'H' | 'G' | 'I')).count()),
+    );
+    features.insert("strand_residue_count".to_string(), json!(ss_all.chars().filter(|&c| c == 'E').count()));
+    features.insert("coil_residue_count".to_string(), json!(ss_all.chars().filter(|&c| c == 'C').count()));
+    let contacts = interactions::interactions(structure);
+    features.insert(
+        "disulfide_count".to_string(),
+        json!(contacts.iter().filter(|i| i.kind == "disulfide").count()),
+    );
+    features.insert(
+        "salt_bridge_count".to_string(),
+        json!(contacts.iter().filter(|i| i.kind == "salt_bridge").count()),
+    );
+    features.insert(
+        "hydrogen_bond_count".to_string(),
+        json!(contacts.iter().filter(|i| i.kind == "hydrogen_bond").count()),
+    );
     features.insert("centroid".to_string(), json!(structure_centroid(structure)));
     features.insert(
         "graph_density".to_string(),

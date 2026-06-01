@@ -1,7 +1,9 @@
+mod align;
 mod bcif;
 mod model;
 mod parser;
 
+pub use align::{kabsch, Superposition};
 pub use model::{
     Atom, AtomId, Chain, ChainId, ParseSummary, Residue, ResidueId, Structure, StructureId,
     StructureMetadata,
