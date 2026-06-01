@@ -4,7 +4,7 @@ use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 use structscope_agent::guard_available;
-use structscope_core::{parse_file, ParseOptions, Structure};
+use structscope_core::{kabsch, parse_file, ParseOptions, Structure};
 use structscope_events::Event;
 use structscope_features::compute_features;
 use structscope_graphs::{build_atom_graph, build_interface_graph, build_residue_graph, export_graphml};
@@ -55,6 +55,14 @@ enum Commands {
         #[arg(long)]
         sql: String,
     },
+    /// Optimal-superposition RMSD between two structures over matched atoms.
+    Rmsd {
+        reference: PathBuf,
+        mobile: PathBuf,
+        /// Atom selection for correspondence: ca, backbone, or all.
+        #[arg(long, default_value = "ca")]
+        atoms: String,
+    },
     Provenance {
         sqlite: PathBuf,
     },
@@ -89,6 +97,7 @@ fn main() -> Result<()> {
             println!("{}", run_query(&input, &sql)?);
             Ok(())
         }
+        Commands::Rmsd { reference, mobile, atoms } => cmd_rmsd(&reference, &mobile, &atoms),
         Commands::Provenance { sqlite } => cmd_provenance(&sqlite),
     }
 }
@@ -216,6 +225,38 @@ fn cmd_graph(input: &Path, graph_type: &str, format: &str, out: Option<PathBuf>)
     }
     fs::write(&out_path, graphml).with_context(|| format!("failed to write {}", out_path.display()))?;
     println!("{}", out_path.display());
+    Ok(())
+}
+
+fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str) -> Result<()> {
+    let select = |s: &Structure| -> Vec<[f64; 3]> {
+        s.chains
+            .iter()
+            .flat_map(|c| &c.residues)
+            .flat_map(|r| &r.atoms)
+            .filter(|a| match atoms {
+                "ca" => a.name == "CA",
+                "backbone" => matches!(a.name.as_str(), "N" | "CA" | "C" | "O"),
+                _ => true,
+            })
+            .map(|a| [a.x, a.y, a.z])
+            .collect()
+    };
+
+    let reference_structure = parse_file(reference, ParseOptions::default())?;
+    let mobile_structure = parse_file(mobile, ParseOptions::default())?;
+    let ref_coords = select(&reference_structure);
+    let mob_coords = select(&mobile_structure);
+
+    if ref_coords.len() != mob_coords.len() {
+        anyhow::bail!(
+            "atom count mismatch under selection '{atoms}': reference has {}, mobile has {} (need equal counts for point correspondence)",
+            ref_coords.len(),
+            mob_coords.len()
+        );
+    }
+    let sp = kabsch(&mob_coords, &ref_coords).context("superposition failed (empty selection?)")?;
+    println!("rmsd={:.4}; atoms={}; selection={atoms}", sp.rmsd, ref_coords.len());
     Ok(())
 }
 
