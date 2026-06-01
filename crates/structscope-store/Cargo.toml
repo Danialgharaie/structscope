@@ -6,10 +6,16 @@ license.workspace = true
 
 [features]
 default = []
-duckdb = []
+duckdb = ["dep:duckdb"]
 
 [dependencies]
 anyhow.workspace = true
+arrow = "58"
+parquet = { version = "58", features = ["arrow"] }
 serde.workspace = true
 serde_json.workspace = true
 structscope-features = { path = "../structscope-features" }
+duckdb = { version = "1.10503", features = ["bundled"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"

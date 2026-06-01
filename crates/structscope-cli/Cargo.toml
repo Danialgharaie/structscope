@@ -8,6 +8,10 @@ license.workspace = true
 name = "structscope"
 path = "src/main.rs"
 
+[features]
+default = []
+duckdb = ["structscope-store/duckdb"]
+
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true

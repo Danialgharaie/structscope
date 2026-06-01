@@ -9,13 +9,21 @@ This repository currently contains a bootstrap implementation with:
 - canonical structure normalization
 - residue-graph construction
 - basic and graph-derived feature extraction
-- JSONL feature export
+- JSONL and Parquet feature export
+- DuckDB-backed SQL querying over feature Parquet (build with `--features duckdb`)
 - optional SQLite/JSONL provenance
 - CLI entrypoints for parse, featurize, graph, query, and provenance
+
+Querying is gated behind a Cargo feature because it bundles DuckDB:
+
+```
+cargo build -p structscope-cli --features duckdb
+structscope query <features.parquet|out-dir> --sql "SELECT * FROM features"
+```
+
+Feature records are exposed to SQL as a `features` table.
 
 Current limitations:
 
 - BinaryCIF is not implemented yet
-- Parquet writing is not implemented in this bootstrap slice
-- DuckDB-backed querying is a stub until the `duckdb` integration is added
 - the eBPF guard crate is scaffolded only
