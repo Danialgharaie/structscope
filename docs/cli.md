@@ -21,6 +21,7 @@ Compute structure-level features and write them to an output directory
 ```
 structscope featurize 1nkd.cif.gz --out ./out
 structscope featurize ./structures --out ./out --provenance
+structscope featurize ./structures --out ./out --provenance -j 4
 ```
 
 Emitted features include counts (atoms, residues, chains, ligands), graph

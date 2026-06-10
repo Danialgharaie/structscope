@@ -7,6 +7,8 @@ All notable changes to this project are documented here. This project follows
 
 ### Added
 
+- Parallel execution support for `structscope featurize` using Rayon, allowing high-performance concurrent parsing and feature extraction controlled via a new `--jobs` / `-j` CLI flag.
+- Thread-safe background event and provenance logging architecture using a message-passing channel (`mpsc`) to safely write events to SQLite and JSONL from worker threads.
 - BinaryCIF (`.bcif` / `.bcif.gz`) parsing: a hand-written MessagePack-based
   decoder covering all seven column encodings (ByteArray, IntegerPacking,
   RunLength, Delta, FixedPoint, IntervalQuantization, StringArray) and value

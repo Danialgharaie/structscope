@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
+use rayon::prelude::*;
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -40,6 +41,8 @@ enum Commands {
         jsonl: Option<PathBuf>,
         #[arg(long)]
         guard: bool,
+        #[arg(long, short = 'j')]
+        jobs: Option<usize>,
     },
     Graph {
         input: PathBuf,
@@ -101,7 +104,8 @@ fn main() -> Result<()> {
             sqlite,
             jsonl,
             guard,
-        } => cmd_featurize(&input, &out, provenance, sqlite, jsonl, guard),
+            jobs,
+        } => cmd_featurize(&input, &out, provenance, sqlite, jsonl, guard, jobs),
         Commands::Graph {
             input,
             graph_type,
@@ -147,11 +151,25 @@ fn cmd_featurize(
     sqlite: Option<PathBuf>,
     jsonl: Option<PathBuf>,
     guard: bool,
+    jobs: Option<usize>,
 ) -> Result<()> {
     let inputs = collect_inputs(input)?;
     fs::create_dir_all(out)?;
-    let mut recorder = if provenance {
-        Some(ProvenanceRecorder::open(
+
+    if let Some(num_threads) = jobs {
+        let _ = rayon::ThreadPoolBuilder::new()
+            .num_threads(num_threads)
+            .build_global();
+    }
+
+    if guard && !guard_available() {
+        eprintln!("guard requested, but the optional eBPF agent is not implemented in this bootstrap slice");
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel::<Event>();
+
+    let logging_thread = if provenance {
+        let mut recorder = ProvenanceRecorder::open(
             &ProvenanceConfig {
                 sqlite_path: Some(normalize_output_path(
                     sqlite,
@@ -163,48 +181,65 @@ fn cmd_featurize(
                 )),
             },
             "featurize",
-        )?)
+        )?;
+
+        let handle = std::thread::spawn(move || -> Result<ProvenanceRecorder> {
+            while let Ok(event) = rx.recv() {
+                recorder.record(event)?;
+            }
+            Ok(recorder)
+        });
+        Some(handle)
     } else {
         None
     };
 
-    if guard && !guard_available() {
-        eprintln!("guard requested, but the optional eBPF agent is not implemented in this bootstrap slice");
-    }
+    let tx_mutex = std::sync::Mutex::new(tx);
 
-    let mut records = Vec::new();
-    for path in inputs {
-        if let Some(recorder) = recorder.as_mut() {
-            recorder.record(Event::new(
-                "parse_start",
-                None,
-                json!({ "path": path.display().to_string() }),
-            ))?;
-        }
+    let records: Vec<_> = inputs
+        .par_iter()
+        .filter_map(|path| {
+            if provenance {
+                let _ = tx_mutex.lock().unwrap().send(Event::new(
+                    "parse_start",
+                    None,
+                    json!({ "path": path.display().to_string() }),
+                ));
+            }
 
-        match parse_file(&path, ParseOptions::default()) {
-            Ok(structure) => {
-                let record = compute_features(&structure);
-                if let Some(recorder) = recorder.as_mut() {
-                    recorder.record(Event::new(
-                        "feature_complete",
-                        Some(structure.id.clone()),
-                        json!({ "path": path.display().to_string() }),
-                    ))?;
+            match parse_file(path, ParseOptions::default()) {
+                Ok(structure) => {
+                    let record = compute_features(&structure);
+                    if provenance {
+                        let _ = tx_mutex.lock().unwrap().send(Event::new(
+                            "feature_complete",
+                            Some(structure.id.clone()),
+                            json!({ "path": path.display().to_string() }),
+                        ));
+                    }
+                    Some(record)
                 }
-                records.push(record);
-            }
-            Err(err) => {
-                if let Some(recorder) = recorder.as_mut() {
-                    recorder.record(Event::new(
-                        "structure_failed",
-                        None,
-                        json!({ "path": path.display().to_string(), "error": err.to_string() }),
-                    ))?;
+                Err(err) => {
+                    if provenance {
+                        let _ = tx_mutex.lock().unwrap().send(Event::new(
+                            "structure_failed",
+                            None,
+                            json!({ "path": path.display().to_string(), "error": err.to_string() }),
+                        ));
+                    }
+                    None
                 }
             }
-        }
-    }
+        })
+        .collect();
+
+    drop(tx_mutex);
+
+    let mut recorder = if let Some(handle) = logging_thread {
+        Some(handle.join().unwrap()?)
+    } else {
+        None
+    };
 
     let manifest = write_feature_records(out, &records)?;
     if let Some(recorder) = recorder.as_mut() {
