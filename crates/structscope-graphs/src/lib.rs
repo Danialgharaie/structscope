@@ -33,10 +33,46 @@ pub struct ContactEdge {
     pub kind: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChemicalInteraction {
+    pub kind: String,
+    pub res_id_a: String,
+    pub res_id_b: String,
+    pub distance: f64,
+}
+
+pub fn atom_id_to_residue_id(atom_id: &str) -> Option<String> {
+    let parts: Vec<&str> = atom_id.split(':').collect();
+    if parts.len() >= 3 {
+        let residue_parts = &parts[..parts.len() - 2];
+        Some(residue_parts.join(":"))
+    } else {
+        None
+    }
+}
+
+fn interaction_priority(kind: &str) -> i32 {
+    match kind {
+        "disulfide" => 7,
+        "salt_bridge" => 6,
+        "hydrogen_bond" => 5,
+        "cation_pi" => 4,
+        "pi_pi_parallel" => 3,
+        "pi_pi_perpendicular" => 3,
+        "hydrophobic" => 2,
+        "distance_contact" | "interface_contact" => 1,
+        _ => 0, // covalent_adjacency or unknown
+    }
+}
+
 pub type ResidueGraph = UnGraph<ResidueNode, ContactEdge>;
 pub type AtomGraph = UnGraph<AtomNode, ContactEdge>;
 
-pub fn build_residue_graph(structure: &Structure, threshold_angstroms: f64) -> ResidueGraph {
+pub fn build_residue_graph(
+    structure: &Structure,
+    threshold_angstroms: f64,
+    interactions: Option<&[ChemicalInteraction]>,
+) -> ResidueGraph {
     let mut graph = ResidueGraph::default();
     let mut entries = Vec::new();
 
@@ -87,12 +123,52 @@ pub fn build_residue_graph(structure: &Structure, threshold_angstroms: f64) -> R
         }
     }
 
+    if let Some(interactions) = interactions {
+        let mut id_to_index = HashMap::new();
+        for (_, residue, index) in &entries {
+            id_to_index.insert(residue.id.clone(), *index);
+        }
+
+        for interaction in interactions {
+            if let (Some(&a_idx), Some(&b_idx)) = (
+                id_to_index.get(&interaction.res_id_a),
+                id_to_index.get(&interaction.res_id_b),
+            ) {
+                if let Some(edge_idx) = graph.find_edge(a_idx, b_idx) {
+                    let edge = &mut graph[edge_idx];
+                    let existing_prio = interaction_priority(&edge.kind);
+                    let new_prio = interaction_priority(&interaction.kind);
+                    if edge.kind != "covalent_adjacency"
+                        && (new_prio > existing_prio
+                            || (new_prio == existing_prio && interaction.distance < edge.distance))
+                    {
+                        edge.kind = interaction.kind.clone();
+                        edge.distance = interaction.distance;
+                    }
+                } else {
+                    graph.add_edge(
+                        a_idx,
+                        b_idx,
+                        ContactEdge {
+                            distance: interaction.distance,
+                            kind: interaction.kind.clone(),
+                        },
+                    );
+                }
+            }
+        }
+    }
+
     graph
 }
 
 /// Residue graph containing only inter-chain contacts. Residues without an
 /// interface contact are omitted so the graph represents the interface itself.
-pub fn build_interface_graph(structure: &Structure, threshold_angstroms: f64) -> ResidueGraph {
+pub fn build_interface_graph(
+    structure: &Structure,
+    threshold_angstroms: f64,
+    interactions: Option<&[ChemicalInteraction]>,
+) -> ResidueGraph {
     let residues: Vec<(&str, &Residue)> = structure
         .chains
         .iter()
@@ -123,6 +199,46 @@ pub fn build_interface_graph(structure: &Structure, threshold_angstroms: f64) ->
                 let a = ensure_node(&mut graph, &mut node_index, left);
                 let b = ensure_node(&mut graph, &mut node_index, right);
                 graph.add_edge(a, b, ContactEdge { distance, kind: "interface_contact".to_string() });
+            }
+        }
+    }
+
+    if let Some(interactions) = interactions {
+        let mut residue_id_to_slice_index = HashMap::new();
+        for (idx, (_, residue)) in residues.iter().enumerate() {
+            residue_id_to_slice_index.insert(residue.id.as_str(), idx);
+        }
+
+        for interaction in interactions {
+            if let (Some(&left_idx), Some(&right_idx)) = (
+                residue_id_to_slice_index.get(interaction.res_id_a.as_str()),
+                residue_id_to_slice_index.get(interaction.res_id_b.as_str()),
+            ) {
+                if residues[left_idx].0 != residues[right_idx].0 {
+                    let a = ensure_node(&mut graph, &mut node_index, left_idx);
+                    let b = ensure_node(&mut graph, &mut node_index, right_idx);
+
+                    if let Some(edge_idx) = graph.find_edge(a, b) {
+                        let edge = &mut graph[edge_idx];
+                        let existing_prio = interaction_priority(&edge.kind);
+                        let new_prio = interaction_priority(&interaction.kind);
+                        if new_prio > existing_prio
+                            || (new_prio == existing_prio && interaction.distance < edge.distance)
+                        {
+                            edge.kind = interaction.kind.clone();
+                            edge.distance = interaction.distance;
+                        }
+                    } else {
+                        graph.add_edge(
+                            a,
+                            b,
+                            ContactEdge {
+                                distance: interaction.distance,
+                                kind: interaction.kind.clone(),
+                            },
+                        );
+                    }
+                }
             }
         }
     }
@@ -215,6 +331,83 @@ pub fn export_graphml<N: GraphmlNode>(graph: &UnGraph<N, ContactEdge>) -> String
     }
     out.push_str("  </graph>\n</graphml>\n");
     out
+}
+
+pub fn export_gml<N: GraphmlNode>(graph: &UnGraph<N, ContactEdge>) -> String {
+    let mut out = String::from("graph [\n  directed 0\n");
+    for node_idx in graph.node_indices() {
+        let node = &graph[node_idx];
+        let id = node_idx.index();
+        out.push_str("  node [\n");
+        out.push_str(&format!("    id {}\n", id));
+        out.push_str(&format!("    label \"{}\"\n", node.graphml_id()));
+        for (key, value) in node.graphml_attrs() {
+            if let Ok(val_i) = value.parse::<i32>() {
+                out.push_str(&format!("    {} {}\n", key, val_i));
+            } else if let Ok(val_f) = value.parse::<f64>() {
+                out.push_str(&format!("    {} {}\n", key, val_f));
+            } else {
+                out.push_str(&format!("    {} \"{}\"\n", key, value));
+            }
+        }
+        out.push_str("  ]\n");
+    }
+    for edge_idx in graph.edge_indices() {
+        let (source, target) = graph.edge_endpoints(edge_idx).expect("edge endpoints");
+        let edge = &graph[edge_idx];
+        out.push_str("  edge [\n");
+        out.push_str(&format!("    source {}\n", source.index()));
+        out.push_str(&format!("    target {}\n", target.index()));
+        out.push_str(&format!("    distance {:.3}\n", edge.distance));
+        out.push_str(&format!("    kind \"{}\"\n", edge.kind));
+        out.push_str("  ]\n");
+    }
+    out.push_str("]\n");
+    out
+}
+
+pub fn export_json<N: serde::Serialize>(graph: &UnGraph<N, ContactEdge>) -> String {
+    #[derive(Serialize)]
+    struct JsonGraph<'a, N> {
+        nodes: Vec<JsonNode<'a, N>>,
+        links: Vec<JsonLink<'a>>,
+    }
+
+    #[derive(Serialize)]
+    struct JsonNode<'a, N> {
+        id: usize,
+        #[serde(flatten)]
+        data: &'a N,
+    }
+
+    #[derive(Serialize)]
+    struct JsonLink<'a> {
+        source: usize,
+        target: usize,
+        #[serde(flatten)]
+        data: &'a ContactEdge,
+    }
+
+    let mut nodes = Vec::new();
+    for node_idx in graph.node_indices() {
+        nodes.push(JsonNode {
+            id: node_idx.index(),
+            data: &graph[node_idx],
+        });
+    }
+
+    let mut links = Vec::new();
+    for edge_idx in graph.edge_indices() {
+        let (source, target) = graph.edge_endpoints(edge_idx).expect("edge endpoints");
+        links.push(JsonLink {
+            source: source.index(),
+            target: target.index(),
+            data: &graph[edge_idx],
+        });
+    }
+
+    let json_graph = JsonGraph { nodes, links };
+    serde_json::to_string_pretty(&json_graph).unwrap_or_default()
 }
 
 /// Return index pairs (i < j) whose points lie within `threshold` using cell hashing.
@@ -313,7 +506,7 @@ ATOM      3  CA  ALA B   1       2.000   0.000   0.000  1.00 0.00           C
 
     #[test]
     fn interface_graph_only_inter_chain() {
-        let graph = build_interface_graph(&parse(TWO_CHAIN), 8.0);
+        let graph = build_interface_graph(&parse(TWO_CHAIN), 8.0, None);
         // A:1-B:1 and A:2-B:1 cross the interface; A:1-A:2 is intra-chain and excluded.
         assert_eq!(graph.edge_count(), 2);
         assert_eq!(graph.node_count(), 3);
@@ -321,8 +514,24 @@ ATOM      3  CA  ALA B   1       2.000   0.000   0.000  1.00 0.00           C
 
     #[test]
     fn interface_graph_empty_for_single_chain() {
-        let graph = build_interface_graph(&parse(ATOMS), 8.0);
+        let graph = build_interface_graph(&parse(ATOMS), 8.0, None);
         assert_eq!(graph.edge_count(), 0);
         assert_eq!(graph.node_count(), 0);
+    }
+
+    #[test]
+    fn build_residue_graph_with_chemical_interactions() {
+        let structure = parse(TWO_CHAIN);
+        let interactions = vec![
+            ChemicalInteraction {
+                kind: "hydrogen_bond".to_string(),
+                res_id_a: format!("{}:A:1:_", structure.id),
+                res_id_b: format!("{}:A:2:_", structure.id),
+                distance: 2.8,
+            }
+        ];
+        let graph = build_residue_graph(&structure, 8.0, Some(&interactions));
+        let edge_idx = graph.find_edge(NodeIndex::new(0), NodeIndex::new(1)).unwrap();
+        assert_eq!(graph[edge_idx].kind, "covalent_adjacency");
     }
 }

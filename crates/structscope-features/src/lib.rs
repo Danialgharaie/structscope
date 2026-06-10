@@ -18,8 +18,8 @@ pub struct FeatureRecord {
 
 pub fn compute_features(structure: &Structure) -> FeatureRecord {
     let summary = structure.summary();
-    let residue_graph = build_residue_graph(structure, 8.0);
-    let interface_graph = build_interface_graph(structure, 8.0);
+    let residue_graph = build_residue_graph(structure, 8.0, None);
+    let interface_graph = build_interface_graph(structure, 8.0, None);
 
     let mut features = Map::new();
     features.insert("atom_count".to_string(), json!(summary.atom_count));

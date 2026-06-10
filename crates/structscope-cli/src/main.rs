@@ -8,7 +8,10 @@ use structscope_agent::guard_available;
 use structscope_core::{kabsch, needleman_wunsch, parse_file, smith_waterman, three_to_one, ParseOptions, Structure};
 use structscope_events::Event;
 use structscope_features::{compute_features, per_residue::per_residue_features};
-use structscope_graphs::{build_atom_graph, build_interface_graph, build_residue_graph, export_graphml};
+use structscope_graphs::{
+    atom_id_to_residue_id, build_atom_graph, build_interface_graph, build_residue_graph,
+    ChemicalInteraction, export_gml, export_graphml, export_json,
+};
 use structscope_provenance::{inspect_sqlite, ProvenanceConfig, ProvenanceRecorder};
 use structscope_store::{normalize_output_path, run_query, write_feature_records};
 use walkdir::WalkDir;
@@ -257,24 +260,51 @@ fn cmd_featurize(
 }
 
 fn cmd_graph(input: &Path, graph_type: &str, format: &str, out: Option<PathBuf>) -> Result<()> {
-    if format != "graphml" {
-        anyhow::bail!("only graphml export is implemented in this bootstrap slice");
-    }
+    let ext = match format.to_lowercase().as_str() {
+        "graphml" => "graphml",
+        "gml" => "gml",
+        "json" => "json",
+        other => anyhow::bail!("unknown format '{other}' (expected graphml, gml, or json)"),
+    };
 
     let structure = parse_file(input, ParseOptions::default())?;
-    let graphml = match graph_type {
-        "residue" => export_graphml(&build_residue_graph(&structure, 8.0)),
-        "interface" => export_graphml(&build_interface_graph(&structure, 8.0)),
-        "atom" => export_graphml(&build_atom_graph(&structure, 5.0)),
-        other => anyhow::bail!("unknown graph type '{other}' (expected residue, atom, or interface)"),
+
+    let raw_interactions = structscope_features::interactions::interactions(&structure);
+    let mut chemical_interactions = Vec::new();
+    for ri in raw_interactions {
+        if let (Some(res_a), Some(res_b)) = (atom_id_to_residue_id(&ri.atom_id_a), atom_id_to_residue_id(&ri.atom_id_b)) {
+            chemical_interactions.push(ChemicalInteraction {
+                kind: ri.kind.to_string(),
+                res_id_a: res_a,
+                res_id_b: res_b,
+                distance: ri.distance,
+            });
+        }
+    }
+
+    let output = match (graph_type, ext) {
+        ("residue", "graphml") => export_graphml(&build_residue_graph(&structure, 8.0, Some(&chemical_interactions))),
+        ("residue", "gml") => export_gml(&build_residue_graph(&structure, 8.0, Some(&chemical_interactions))),
+        ("residue", "json") => export_json(&build_residue_graph(&structure, 8.0, Some(&chemical_interactions))),
+
+        ("interface", "graphml") => export_graphml(&build_interface_graph(&structure, 8.0, Some(&chemical_interactions))),
+        ("interface", "gml") => export_gml(&build_interface_graph(&structure, 8.0, Some(&chemical_interactions))),
+        ("interface", "json") => export_json(&build_interface_graph(&structure, 8.0, Some(&chemical_interactions))),
+
+        ("atom", "graphml") => export_graphml(&build_atom_graph(&structure, 5.0)),
+        ("atom", "gml") => export_gml(&build_atom_graph(&structure, 5.0)),
+        ("atom", "json") => export_json(&build_atom_graph(&structure, 5.0)),
+
+        (other, _) => anyhow::bail!("unknown graph type '{other}' (expected residue, atom, or interface)"),
     };
-    let out_path = normalize_output_path(out, &format!("{}.{}.graphml", structure.id, graph_type));
+
+    let out_path = normalize_output_path(out, &format!("{}.{}.{}", structure.id, graph_type, ext));
     if let Some(parent) = out_path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
         }
     }
-    fs::write(&out_path, graphml).with_context(|| format!("failed to write {}", out_path.display()))?;
+    fs::write(&out_path, output).with_context(|| format!("failed to write {}", out_path.display()))?;
     println!("{}", out_path.display());
     Ok(())
 }

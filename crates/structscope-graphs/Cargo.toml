@@ -7,4 +7,5 @@ license.workspace = true
 [dependencies]
 petgraph.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 structscope-core = { path = "../structscope-core" }
