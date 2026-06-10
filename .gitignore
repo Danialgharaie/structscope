@@ -1,6 +1,7 @@
 /target
 /book
 html-docs/
+.agents/
 *.sqlite
 *.db
 *.jsonl
