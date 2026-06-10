@@ -10,7 +10,7 @@ use structscope_events::Event;
 use structscope_features::{compute_features, per_residue::per_residue_features};
 use structscope_graphs::{
     atom_id_to_residue_id, build_atom_graph, build_interface_graph, build_residue_graph,
-    ChemicalInteraction, export_gml, export_graphml, export_json,
+    ChemicalInteraction, export_gml, export_graphml, export_html, export_json,
 };
 use structscope_provenance::{inspect_sqlite, ProvenanceConfig, ProvenanceRecorder};
 use structscope_store::{normalize_output_path, run_query, write_feature_records};
@@ -264,7 +264,8 @@ fn cmd_graph(input: &Path, graph_type: &str, format: &str, out: Option<PathBuf>)
         "graphml" => "graphml",
         "gml" => "gml",
         "json" => "json",
-        other => anyhow::bail!("unknown format '{other}' (expected graphml, gml, or json)"),
+        "html" => "html",
+        other => anyhow::bail!("unknown format '{other}' (expected graphml, gml, json, or html)"),
     };
 
     let structure = parse_file(input, ParseOptions::default())?;
@@ -286,14 +287,26 @@ fn cmd_graph(input: &Path, graph_type: &str, format: &str, out: Option<PathBuf>)
         ("residue", "graphml") => export_graphml(&build_residue_graph(&structure, 8.0, Some(&chemical_interactions))),
         ("residue", "gml") => export_gml(&build_residue_graph(&structure, 8.0, Some(&chemical_interactions))),
         ("residue", "json") => export_json(&build_residue_graph(&structure, 8.0, Some(&chemical_interactions))),
+        ("residue", "html") => {
+            let pdb_data = structure_to_pdb(&structure);
+            export_html(&build_residue_graph(&structure, 8.0, Some(&chemical_interactions)), &pdb_data, &structure.id)
+        }
 
         ("interface", "graphml") => export_graphml(&build_interface_graph(&structure, 8.0, Some(&chemical_interactions))),
         ("interface", "gml") => export_gml(&build_interface_graph(&structure, 8.0, Some(&chemical_interactions))),
         ("interface", "json") => export_json(&build_interface_graph(&structure, 8.0, Some(&chemical_interactions))),
+        ("interface", "html") => {
+            let pdb_data = structure_to_pdb(&structure);
+            export_html(&build_interface_graph(&structure, 8.0, Some(&chemical_interactions)), &pdb_data, &structure.id)
+        }
 
         ("atom", "graphml") => export_graphml(&build_atom_graph(&structure, 5.0)),
         ("atom", "gml") => export_gml(&build_atom_graph(&structure, 5.0)),
         ("atom", "json") => export_json(&build_atom_graph(&structure, 5.0)),
+        ("atom", "html") => {
+            let pdb_data = structure_to_pdb(&structure);
+            export_html(&build_atom_graph(&structure, 5.0), &pdb_data, &structure.id)
+        }
 
         (other, _) => anyhow::bail!("unknown graph type '{other}' (expected residue, atom, or interface)"),
     };
@@ -307,6 +320,48 @@ fn cmd_graph(input: &Path, graph_type: &str, format: &str, out: Option<PathBuf>)
     fs::write(&out_path, output).with_context(|| format!("failed to write {}", out_path.display()))?;
     println!("{}", out_path.display());
     Ok(())
+}
+
+fn structure_to_pdb(structure: &Structure) -> String {
+    let mut out = String::new();
+    let mut atom_serial = 1;
+    for chain in &structure.chains {
+        for residue in &chain.residues {
+            for atom in &residue.atoms {
+                let atom_name = if atom.name.len() < 4 {
+                    format!(" {:<3}", atom.name)
+                } else {
+                    atom.name.clone()
+                };
+                let res_name = format!("{:<3}", residue.name);
+                let chain_char = chain.id.chars().last().unwrap_or('A');
+                let seq_num = residue.seq_number;
+                let ins_code = residue.insertion_code.as_deref().unwrap_or(" ");
+                let occupancy = atom.occupancy.unwrap_or(1.0);
+                let temp_factor = atom.temp_factor.unwrap_or(0.0);
+                let element = atom.element.as_deref().unwrap_or(" ");
+
+                out.push_str(&format!(
+                    "ATOM  {:5} {:4} {:3} {}{:4}{}   {:8.3}{:8.3}{:8.3}{:6.2}{:6.2}          {:<2}\n",
+                    atom_serial,
+                    atom_name,
+                    res_name,
+                    chain_char,
+                    seq_num,
+                    ins_code,
+                    atom.x,
+                    atom.y,
+                    atom.z,
+                    occupancy,
+                    temp_factor,
+                    element
+                ));
+                atom_serial += 1;
+            }
+        }
+    }
+    out.push_str("END\n");
+    out
 }
 
 fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str, align: bool, local: bool) -> Result<()> {

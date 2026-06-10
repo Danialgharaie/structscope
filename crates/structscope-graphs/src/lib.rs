@@ -410,6 +410,19 @@ pub fn export_json<N: serde::Serialize>(graph: &UnGraph<N, ContactEdge>) -> Stri
     serde_json::to_string_pretty(&json_graph).unwrap_or_default()
 }
 
+pub fn export_html<N: GraphmlNode + serde::Serialize>(
+    graph: &UnGraph<N, ContactEdge>,
+    pdb_data: &str,
+    structure_id: &str,
+) -> String {
+    let graph_json = export_json(graph);
+    let template = include_str!("visualizer_template.html");
+    template
+        .replace("{{STRUCTURE_ID}}", structure_id)
+        .replace("{{GRAPH_JSON}}", &graph_json)
+        .replace("{{PDB_DATA}}", pdb_data)
+}
+
 /// Return index pairs (i < j) whose points lie within `threshold` using cell hashing.
 fn grid_pairs(points: &[(f64, f64, f64)], threshold: f64) -> Vec<(usize, usize, f64)> {
     let cell = threshold.max(f64::MIN_POSITIVE);
