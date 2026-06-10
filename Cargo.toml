@@ -13,10 +13,10 @@ resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2026"
 license = "MIT"
-authors = ["structscope contributors"]
-repository = "https://example.invalid/structscope"
+authors = ["Danial Gharaie Amirabadi"]
+repository = "https://github.com/Danialgharaie/structscope"
 
 [workspace.dependencies]
 anyhow = "1"
