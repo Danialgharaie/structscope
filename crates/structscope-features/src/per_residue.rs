@@ -19,6 +19,7 @@ pub struct ResidueFeature {
     pub phi: Option<f64>,
     pub psi: Option<f64>,
     pub omega: Option<f64>,
+    pub bfactor_mean: Option<f64>,
 }
 
 /// Compute one feature record per residue, in chains -> residues order.
@@ -34,6 +35,13 @@ pub fn per_residue_features(structure: &Structure) -> Vec<ResidueFeature> {
         let ss_chars: Vec<char> = ss[ci].ss.chars().collect();
         for (ri, residue) in chain.residues.iter().enumerate() {
             let mut res_sasa = 0.0;
+            let b_factors: Vec<f64> = residue.atoms.iter().filter_map(|a| a.temp_factor).collect();
+            let bfactor_mean = if b_factors.is_empty() {
+                None
+            } else {
+                Some(b_factors.iter().sum::<f64>() / b_factors.len() as f64)
+            };
+
             for _ in &residue.atoms {
                 res_sasa += sasa[atom_i];
                 atom_i += 1;
@@ -51,6 +59,7 @@ pub fn per_residue_features(structure: &Structure) -> Vec<ResidueFeature> {
                 phi: d.phi,
                 psi: d.psi,
                 omega: d.omega,
+                bfactor_mean,
             });
             res_i += 1;
         }

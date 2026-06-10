@@ -41,6 +41,7 @@ pub struct Atom {
     pub y: f64,
     pub z: f64,
     pub occupancy: Option<f64>,
+    pub temp_factor: Option<f64>,
 }
 
 pub type StructureId = String;

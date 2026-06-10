@@ -32,6 +32,32 @@ pub fn compute_features(structure: &Structure) -> FeatureRecord {
     features.insert("interface_residue_count".to_string(), json!(interface_graph.node_count()));
     features.insert("radius_of_gyration".to_string(), json!(radius_of_gyration(structure)));
     features.insert("sasa_total".to_string(), json!(sasa::total_sasa(structure)));
+
+    let b_factors: Vec<f64> = structure
+        .chains
+        .iter()
+        .flat_map(|c| &c.residues)
+        .flat_map(|r| &r.atoms)
+        .filter_map(|a| a.temp_factor)
+        .collect();
+
+    let (b_mean, b_std, b_min, b_max) = if b_factors.is_empty() {
+        (0.0, 0.0, 0.0, 0.0)
+    } else {
+        let count = b_factors.len() as f64;
+        let sum: f64 = b_factors.iter().sum();
+        let mean = sum / count;
+        let variance: f64 = b_factors.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / count;
+        let std = variance.sqrt();
+        let min = *b_factors.iter().min_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
+        let max = *b_factors.iter().max_by(|x, y| x.partial_cmp(y).unwrap()).unwrap();
+        (mean, std, min, max)
+    };
+
+    features.insert("bfactor_mean".to_string(), json!(b_mean));
+    features.insert("bfactor_std".to_string(), json!(b_std));
+    features.insert("bfactor_min".to_string(), json!(b_min));
+    features.insert("bfactor_max".to_string(), json!(b_max));
     // Buried vs exposed by relative accessibility (standard 25% cutoff); residues
     // without a reference area (non-standard) are excluded from both counts.
     let rsa: Vec<f64> = per_residue::per_residue_features(structure).iter().filter_map(|r| r.rsa).collect();
@@ -56,6 +82,22 @@ pub fn compute_features(structure: &Structure) -> FeatureRecord {
     features.insert(
         "hydrogen_bond_count".to_string(),
         json!(contacts.iter().filter(|i| i.kind == "hydrogen_bond").count()),
+    );
+    features.insert(
+        "cation_pi_count".to_string(),
+        json!(contacts.iter().filter(|i| i.kind == "cation_pi").count()),
+    );
+    features.insert(
+        "pi_pi_parallel_count".to_string(),
+        json!(contacts.iter().filter(|i| i.kind == "pi_pi_parallel").count()),
+    );
+    features.insert(
+        "pi_pi_perpendicular_count".to_string(),
+        json!(contacts.iter().filter(|i| i.kind == "pi_pi_perpendicular").count()),
+    );
+    features.insert(
+        "hydrophobic_count".to_string(),
+        json!(contacts.iter().filter(|i| i.kind == "hydrophobic").count()),
     );
     features.insert("centroid".to_string(), json!(structure_centroid(structure)));
     features.insert(

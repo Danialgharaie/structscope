@@ -14,6 +14,8 @@ fn detects_disulfides_and_contacts_on_real_structure() {
     let count = |k: &str| found.iter().filter(|i| i.kind == k).count();
     assert_eq!(count("disulfide"), 6, "beta-trypsin has six disulfides");
     assert!(count("hydrogen_bond") > 100, "expected many polar contacts");
-    // Every reported distance must be within the loosest cutoff used.
-    assert!(found.iter().all(|i| i.distance <= 4.0));
+    // Every reported distance must be within the loosest cutoff used (6.0A for cation-pi).
+    assert!(found.iter().all(|i| i.distance <= 6.0));
+    assert!(count("cation_pi") > 0, "expected some cation-pi interactions");
+    assert!(count("hydrophobic") > 0, "expected many hydrophobic contacts");
 }

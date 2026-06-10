@@ -22,6 +22,7 @@ struct RawAtom {
     y: f64,
     z: f64,
     occupancy: f64,
+    temp_factor: f64,
     element: String,
     ins_code: Option<char>,
     is_hetatm: bool,
@@ -40,6 +41,7 @@ impl From<PdAtom> for RawAtom {
             y: a.y,
             z: a.z,
             occupancy: a.occupancy,
+            temp_factor: a.temp_factor,
             element: a.element,
             ins_code: a.ins_code,
             is_hetatm: a.is_hetatm,
@@ -145,6 +147,7 @@ fn bcif_atoms(cat: &bcif::Category) -> Vec<RawAtom> {
     let ins = col("pdbx_PDB_ins_code");
     let (x, y, z) = (col("Cartn_x"), col("Cartn_y"), col("Cartn_z"));
     let occ = col("occupancy");
+    let b_fac = col("B_iso_or_equiv");
     let sym = col("type_symbol");
     let id = col("id");
 
@@ -164,6 +167,7 @@ fn bcif_atoms(cat: &bcif::Category) -> Vec<RawAtom> {
                 y: y.and_then(|d| d.as_f64(i)).unwrap_or(0.0),
                 z: z.and_then(|d| d.as_f64(i)).unwrap_or(0.0),
                 occupancy: occ.and_then(|d| d.as_f64(i)).unwrap_or(1.0),
+                temp_factor: b_fac.and_then(|d| d.as_f64(i)).unwrap_or(0.0),
                 element: sym.and_then(|d| d.as_str(i)).unwrap_or_default(),
                 ins_code: one_char(ins),
                 is_hetatm: group.and_then(|d| d.as_str(i)).map(|g| g.trim() == "HETATM").unwrap_or(false),
@@ -276,6 +280,7 @@ fn build_structure(
                     y: atom.y,
                     z: atom.z,
                     occupancy: Some(atom.occupancy),
+                    temp_factor: Some(atom.temp_factor),
                 })
                 .collect();
 
