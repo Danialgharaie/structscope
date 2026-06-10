@@ -59,11 +59,12 @@ message hints at `--align` when they differ.
 
 ## graph
 
-Export a residue, atom, or interface contact graph as GraphML.
+Export a residue, atom, or interface contact graph. Supported formats are `graphml` (default), `gml`, and `json`. Chemical and geometric interactions (disulfides, salt bridges, hydrogen bonds, cation-pi, pi-pi, and hydrophobic contacts) are automatically resolved and embedded as prioritized edges in residue and interface graphs.
 
 ```
+structscope graph 1nkd.cif.gz --graph-type residue --format gml
+structscope graph complex.cif.gz --graph-type interface --format json
 structscope graph 1nkd.cif.gz --graph-type residue --out graph.graphml
-structscope graph complex.cif.gz --graph-type interface
 ```
 
 ## query

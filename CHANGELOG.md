@@ -8,6 +8,10 @@ All notable changes to this project are documented here. This project follows
 ### Added
 
 - Parallel execution support for `structscope featurize` using Rayon, allowing high-performance concurrent parsing and feature extraction controlled via a new `--jobs` / `-j` CLI flag.
+- B-factor (temperature factor) support: extended core `Atom` model, parsed B-factors from PDB, mmCIF, and BinaryCIF, and computed structure-level (`bfactor_mean`, `bfactor_std`, `bfactor_min`, `bfactor_max`) and residue-level statistics.
+- Advanced geometric interaction detectors: cation-pi, parallel and perpendicular pi-pi stacking, and hydrophobic carbon-carbon contacts.
+- Enhanced contact graphs: integrated chemical/geometric interactions as prioritized edges overlaying standard distance contacts.
+- New contact graph formats: added custom exporters for GML and node-link JSON formats, with automatic file extension matching.
 - Thread-safe background event and provenance logging architecture using a message-passing channel (`mpsc`) to safely write events to SQLite and JSONL from worker threads.
 - BinaryCIF (`.bcif` / `.bcif.gz`) parsing: a hand-written MessagePack-based
   decoder covering all seven column encodings (ByteArray, IntegerPacking,

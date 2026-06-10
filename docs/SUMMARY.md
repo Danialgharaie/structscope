@@ -4,4 +4,5 @@
 
 - [CLI Usage](cli.md)
 - [Architecture](architecture.md)
+- [Interactions and Graphs](interactions_and_graphs.md)
 - [Changelog](changelog.md)
