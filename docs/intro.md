@@ -4,6 +4,9 @@
   <img src="../assets/structscope-logo.svg" alt="structscope" width="360">
 </p>
 
+> **Work in progress** — APIs, CLI flags, and output schemas may change between
+> releases. Pin a version tag for reproducible workflows.
+
 `structscope` is a Rust-native structural bioinformatics toolkit for canonical
 protein structure parsing, graph-native representations, reproducible feature
 extraction, and analytical outputs.

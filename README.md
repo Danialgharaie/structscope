@@ -4,6 +4,10 @@
 
 # structscope
 
+> **Work in progress** — `structscope` is under active development. CLI flags,
+> feature field names, and output formats may change between releases. Pin a
+> version tag (e.g. `v0.4.0`) for reproducible workflows.
+
 `structscope` is a Rust-native structural bioinformatics toolkit for canonical protein structure parsing, graph-native representations, reproducible feature extraction, and analytical outputs.
 
 This repository currently contains a bootstrap implementation with:
@@ -48,4 +52,22 @@ Current limitations:
 - [CLI usage](docs/cli.md) — commands and examples
 - [Architecture](docs/architecture.md) — crate layout
 - [Changelog](CHANGELOG.md)
+
+## Citation
+
+If you use structscope in academic work, please cite the repository (entry subject to change while WIP):
+
+```bibtex
+@software{structscope2026,
+  author    = {Amirabadi, Danial Gharaie},
+  title     = {{structscope}: Rust-native structural bioinformatics toolkit},
+  year      = {2026},
+  publisher = {GitHub},
+  url       = {https://github.com/Danialgharaie/structscope},
+  version   = {0.4.0},
+  note      = {Work in progress. APIs and output schemas may change between releases.}
+}
+```
+
+See also [`CITATION.bib`](CITATION.bib).
 
