@@ -9,6 +9,7 @@ use structscope_agent::guard_available;
 use structscope_core::{parse_file, superposition_rmsd, LigandFilter, ParseOptions, RmsdParams, Structure};
 use structscope_events::Event;
 use structscope_features::{
+    compare::{compare_set, write_compare_csv, write_compare_json, ParseFailure, ReferenceMode},
     compute_features, interface::per_interface_features, ligand::per_ligand_features,
     per_residue::per_residue_features, quality::per_residue_quality,
 };
@@ -101,6 +102,74 @@ fn validate_clash_overlap(overlap: f64) -> Result<()> {
     Ok(())
 }
 
+#[derive(Clone, Copy, Debug, Default, ValueEnum)]
+enum CompareFormat {
+    #[default]
+    Json,
+    Csv,
+}
+
+#[derive(Parser, Clone, Default)]
+struct CompareCliArgs {
+    #[arg(long)]
+    reference: Option<PathBuf>,
+    #[arg(long)]
+    auto_reference: bool,
+    #[arg(long)]
+    reference_by: Option<String>,
+    /// Atom selection for RMSD correspondence: ca, backbone, or all.
+    #[arg(long, default_value = "ca")]
+    atoms: String,
+    /// Establish residue correspondence by sequence alignment (default on for compare).
+    #[arg(long, default_value_t = true)]
+    align: bool,
+    /// Like --align but uses local (Smith-Waterman) alignment for partial overlaps.
+    #[arg(long)]
+    local: bool,
+    #[arg(long, value_delimiter = ',')]
+    delta_fields: Vec<String>,
+    #[arg(long, value_enum, default_value_t = CompareFormat::Json)]
+    format: CompareFormat,
+    #[arg(long)]
+    out: Option<PathBuf>,
+    #[command(flatten)]
+    ligand: LigandCliArgs,
+    #[command(flatten)]
+    interface: InterfaceCliArgs,
+    #[command(flatten)]
+    quality: QualityCliArgs,
+}
+
+fn build_reference_mode(args: &CompareCliArgs) -> Result<ReferenceMode> {
+    if let Some(path) = &args.reference {
+        return Ok(ReferenceMode::ExplicitPath(path.clone()));
+    }
+    if let Some(spec) = &args.reference_by {
+        return parse_reference_by(spec);
+    }
+    if args.auto_reference {
+        return Ok(ReferenceMode::AutoQuality);
+    }
+    Ok(ReferenceMode::FirstInput)
+}
+
+fn parse_reference_by(spec: &str) -> Result<ReferenceMode> {
+    let (direction, field) = spec.split_once(':').with_context(|| {
+        format!("reference-by must be min:field or max:field, got '{spec}'")
+    })?;
+    match direction {
+        "min" => Ok(ReferenceMode::ByField {
+            maximize: false,
+            field: field.to_string(),
+        }),
+        "max" => Ok(ReferenceMode::ByField {
+            maximize: true,
+            field: field.to_string(),
+        }),
+        other => anyhow::bail!("reference-by direction must be min or max, got '{other}'"),
+    }
+}
+
 #[derive(Subcommand)]
 enum Commands {
     Parse {
@@ -169,6 +238,12 @@ enum Commands {
         #[arg(long)]
         sql: String,
     },
+    /// Compare multiple structures: pairwise RMSD matrix and feature deltas vs a reference.
+    Compare {
+        input: PathBuf,
+        #[command(flatten)]
+        compare: CompareCliArgs,
+    },
     /// Optimal-superposition RMSD between two structures over matched atoms.
     Rmsd {
         reference: PathBuf,
@@ -233,6 +308,7 @@ fn main() -> Result<()> {
             println!("{}", run_query(&input, &sql)?);
             Ok(())
         }
+        Commands::Compare { input, compare } => cmd_compare(&input, &compare),
         Commands::Rmsd { reference, mobile, atoms, align, local } => cmd_rmsd(&reference, &mobile, &atoms, align, local),
         Commands::Residues { input, out } => cmd_residues(&input, out),
         Commands::Provenance { sqlite } => cmd_provenance(&sqlite),
@@ -492,6 +568,99 @@ fn structure_to_pdb(structure: &Structure) -> String {
     }
     out.push_str("END\n");
     out
+}
+
+fn cmd_compare(input: &Path, args: &CompareCliArgs) -> Result<()> {
+    validate_binding_distance(args.ligand.binding_distance)?;
+    validate_interface_distances(&args.interface)?;
+    validate_clash_overlap(args.quality.clash_overlap)?;
+
+    let paths = collect_inputs(input)?;
+    if paths.len() < 2 {
+        anyhow::bail!(
+            "compare requires at least 2 input structures, found {}",
+            paths.len()
+        );
+    }
+
+    let filter = build_ligand_filter(&args.ligand);
+    let binding_distance = args.ligand.binding_distance;
+    let iface_params = build_interface_params(&args.interface);
+    let quality_params = build_quality_params(&args.quality);
+
+    let mut structures = Vec::new();
+    let mut records = Vec::new();
+    let mut successful_paths = Vec::new();
+    let mut failed = Vec::new();
+
+    for path in paths {
+        match parse_file(&path, ParseOptions::default()) {
+            Ok(structure) => {
+                let record = compute_features(
+                    &structure,
+                    &filter,
+                    binding_distance,
+                    &iface_params,
+                    &quality_params,
+                );
+                structures.push(structure);
+                records.push(record);
+                successful_paths.push(path);
+            }
+            Err(err) => {
+                failed.push(ParseFailure {
+                    path: path.to_string_lossy().into_owned(),
+                    error: err.to_string(),
+                });
+            }
+        }
+    }
+
+    if structures.len() < 2 {
+        anyhow::bail!(
+            "compare requires at least 2 successfully parsed structures, found {} ({} failed)",
+            structures.len(),
+            failed.len()
+        );
+    }
+
+    let reference_mode = build_reference_mode(args)?;
+    let delta_fields = if args.delta_fields.is_empty() {
+        None
+    } else {
+        Some(args.delta_fields.as_slice())
+    };
+    let failed = if failed.is_empty() {
+        None
+    } else {
+        Some(failed)
+    };
+
+    let result = compare_set(
+        &structures,
+        &records,
+        &successful_paths,
+        &RmsdParams {
+            atoms: args.atoms.clone(),
+            align: args.align,
+            local: args.local,
+        },
+        &reference_mode,
+        delta_fields,
+        failed,
+    )?;
+
+    if let Some(out_dir) = &args.out {
+        match args.format {
+            CompareFormat::Json => write_compare_json(out_dir, &result)?,
+            CompareFormat::Csv => write_compare_csv(out_dir, &result)?,
+        }
+        println!("{}", out_dir.display());
+    } else {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    }
+
+    Ok(())
 }
 
 fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str, align: bool, local: bool) -> Result<()> {

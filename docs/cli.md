@@ -96,6 +96,25 @@ structscope residues 1nkd.cif.gz
 structscope residues 1nkd.cif.gz --out residues.jsonl
 ```
 
+## compare
+
+Compare two or more structures: pairwise RMSD matrix (CA atoms with sequence
+alignment by default) and numeric feature deltas against a chosen reference.
+Accepts a single file or a directory of structures.
+
+```
+structscope compare ./models
+structscope compare ./models --reference ref.pdb
+structscope compare ./models --auto-reference
+structscope compare ./models --reference-by min:ramachandran_outlier_count
+structscope compare ./models --delta-fields sasa_total,interface_bsa_total --out ./compare-out
+structscope compare ./models --out ./compare-out --format csv
+```
+
+Reference selection (first match wins): `--reference`, `--reference-by`,
+`--auto-reference`, else the first input file. Optional ligand, interface, and
+quality flags match `featurize`.
+
 ## rmsd
 
 Optimal-superposition RMSD between two structures.
