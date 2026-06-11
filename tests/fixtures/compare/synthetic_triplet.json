@@ -1,0 +1,89 @@
+{
+  "pdbs": [
+    "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C\nATOM      2  CA  GLY A   2       1.000   0.000   0.000  1.00  0.00           C\nATOM      3  CA  VAL A   3       0.000   1.000   0.000  1.00  0.00           C\n",
+    "ATOM      1  CA  ALA A   1       0.500   0.000   0.000  1.00  0.00           C\nATOM      2  CA  GLY A   2       1.000   0.000   0.000  1.00  0.00           C\nATOM      3  CA  VAL A   3       0.000   1.000   0.000  1.00  0.00           C\n",
+    "ATOM      1  CA  ALA A   1       1.000   0.000   0.000  1.00  0.00           C\nATOM      2  CA  GLY A   2       1.000   0.000   0.000  1.00  0.00           C\nATOM      3  CA  VAL A   3       0.000   1.000   0.000  1.00  0.00           C\n"
+  ],
+  "paths": [
+    "s1.pdb",
+    "s2.pdb",
+    "s3.pdb"
+  ],
+  "params": {
+    "rmsd": {
+      "atoms": "ca",
+      "align": false,
+      "local": false
+    },
+    "reference_mode": "first_input",
+    "delta_fields": [
+      "sasa_total"
+    ]
+  },
+  "features": [
+    {
+      "structure_id": "s1",
+      "sasa_total": 1000.0
+    },
+    {
+      "structure_id": "s2",
+      "sasa_total": 1100.0
+    },
+    {
+      "structure_id": "s3",
+      "sasa_total": 1200.0
+    }
+  ],
+  "expected": {
+    "reference_id": "s1",
+    "reference_path": "s1.pdb",
+    "reference_mode": "first_input",
+    "structure_count": 3,
+    "structures": [
+      "s1",
+      "s2",
+      "s3"
+    ],
+    "matrix": {
+      "labels": [
+        "s1",
+        "s2",
+        "s3"
+      ],
+      "rmsd": [
+        [
+          0.0,
+          0.2183097158051996,
+          0.4314632312985458
+        ],
+        [
+          0.2183097158051996,
+          0.0,
+          0.2183097158051996
+        ],
+        [
+          0.4314632312985458,
+          0.2183097158051996,
+          0.0
+        ]
+      ]
+    },
+    "deltas_count": 2,
+    "deltas": [
+      {
+        "structure_id": "s2",
+        "source_path": null,
+        "sasa_total": 1100.0,
+        "reference_sasa_total": 1000.0,
+        "delta_sasa_total": 100.0
+      },
+      {
+        "structure_id": "s3",
+        "source_path": null,
+        "sasa_total": 1200.0,
+        "reference_sasa_total": 1000.0,
+        "delta_sasa_total": 200.0
+      }
+    ]
+  }
+}
