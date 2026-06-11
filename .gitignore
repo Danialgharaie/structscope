@@ -2,6 +2,7 @@
 /book
 html-docs/
 .agents/
+docs/superpowers/
 *.sqlite
 *.db
 *.jsonl
