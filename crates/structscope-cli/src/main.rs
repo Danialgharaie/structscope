@@ -8,7 +8,10 @@ use std::path::{Path, PathBuf};
 use structscope_agent::guard_available;
 use structscope_core::{kabsch, needleman_wunsch, parse_file, smith_waterman, three_to_one, LigandFilter, ParseOptions, Structure};
 use structscope_events::Event;
-use structscope_features::{compute_features, ligand::per_ligand_features, per_residue::per_residue_features};
+use structscope_features::{
+    compute_features, interface::per_interface_features, ligand::per_ligand_features,
+    per_residue::per_residue_features,
+};
 use structscope_graphs::{
     atom_id_to_residue_id, build_atom_graph, build_interface_graph, build_residue_graph,
     ChemicalInteraction, export_gml, export_graphml, export_html, export_json,
@@ -52,6 +55,31 @@ fn validate_binding_distance(distance: f64) -> Result<()> {
     Ok(())
 }
 
+#[derive(Parser, Clone, Default)]
+struct InterfaceCliArgs {
+    #[arg(long, default_value_t = 8.0)]
+    interface_distance: f64,
+    #[arg(long, default_value_t = 5.0)]
+    interface_area_distance: f64,
+    #[arg(long, default_value_t = 5.0)]
+    interface_sc_distance: f64,
+}
+
+fn build_interface_params(args: &InterfaceCliArgs) -> structscope_features::interface::InterfaceParams {
+    structscope_features::interface::InterfaceParams {
+        contact_distance: args.interface_distance,
+        area_distance: args.interface_area_distance,
+        sc_distance: args.interface_sc_distance,
+    }
+}
+
+fn validate_interface_distances(args: &InterfaceCliArgs) -> Result<()> {
+    if args.interface_distance <= 0.0 || args.interface_area_distance <= 0.0 || args.interface_sc_distance <= 0.0 {
+        anyhow::bail!("interface distance flags must be positive");
+    }
+    Ok(())
+}
+
 #[derive(Subcommand)]
 enum Commands {
     Parse {
@@ -77,6 +105,8 @@ enum Commands {
         jobs: Option<usize>,
         #[command(flatten)]
         ligand: LigandCliArgs,
+        #[command(flatten)]
+        interface: InterfaceCliArgs,
     },
     /// Emit per-ligand features (SASA, binding-site residues, interaction counts) as JSONL.
     Ligands {
@@ -85,6 +115,14 @@ enum Commands {
         out: Option<PathBuf>,
         #[command(flatten)]
         ligand: LigandCliArgs,
+    },
+    /// Emit per chain-pair interface features (BSA, area, shape complementarity) as JSONL.
+    Interfaces {
+        input: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[command(flatten)]
+        interface: InterfaceCliArgs,
     },
     Graph {
         input: PathBuf,
@@ -148,8 +186,10 @@ fn main() -> Result<()> {
             guard,
             jobs,
             ligand,
-        } => cmd_featurize(&input, &out, provenance, sqlite, jsonl, guard, jobs, &ligand),
+            interface,
+        } => cmd_featurize(&input, &out, provenance, sqlite, jsonl, guard, jobs, &ligand, &interface),
         Commands::Ligands { input, out, ligand } => cmd_ligands(&input, out, &ligand),
+        Commands::Interfaces { input, out, interface } => cmd_interfaces(&input, out, &interface),
         Commands::Graph {
             input,
             graph_type,
@@ -197,8 +237,10 @@ fn cmd_featurize(
     guard: bool,
     jobs: Option<usize>,
     ligand_args: &LigandCliArgs,
+    interface_args: &InterfaceCliArgs,
 ) -> Result<()> {
     validate_binding_distance(ligand_args.binding_distance)?;
+    validate_interface_distances(interface_args)?;
     let filter = build_ligand_filter(ligand_args);
     let binding_distance = ligand_args.binding_distance;
     let inputs = collect_inputs(input)?;
@@ -243,11 +285,7 @@ fn cmd_featurize(
     };
 
     let tx_mutex = std::sync::Mutex::new(tx);
-    let iface_params = structscope_features::interface::InterfaceParams {
-        contact_distance: 8.0,
-        area_distance: 5.0,
-        sc_distance: 5.0,
-    };
+    let iface_params = build_interface_params(interface_args);
 
     let records: Vec<_> = inputs
         .par_iter()
@@ -481,6 +519,21 @@ fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str, align: bool, local: bo
         atoms
     };
     println!("rmsd={:.4}; atoms={}; selection={mode}", sp.rmsd, ref_coords.len());
+    Ok(())
+}
+
+fn cmd_interfaces(input: &Path, out: Option<PathBuf>, args: &InterfaceCliArgs) -> Result<()> {
+    validate_interface_distances(args)?;
+    let structure = parse_file(input, ParseOptions::default())?;
+    let params = build_interface_params(args);
+    let records = per_interface_features(&structure, &params);
+    let mut writer: Box<dyn Write> = match out {
+        Some(path) => Box::new(fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+    for record in records {
+        writeln!(writer, "{}", serde_json::to_string(&record)?)?;
+    }
     Ok(())
 }
 

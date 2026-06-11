@@ -23,6 +23,7 @@ structscope featurize 1nkd.cif.gz --out ./out
 structscope featurize ./structures --out ./out --provenance
 structscope featurize ./structures --out ./out --provenance -j 4
 structscope featurize ./structures --out ./out --ligand-exclude SO4,PO4
+structscope featurize dimer.pdb --out ./out --interface-distance 8.0
 ```
 
 Optional ligand flags (also on `ligands`):
@@ -31,11 +32,18 @@ Optional ligand flags (also on `ligands`):
 - `--ligand-include RES[,RES...]` — allowlist mode; only these hetero residues count
 - `--binding-distance <Å>` — binding-site cutoff (default `5.0`)
 
+Optional interface flags (also on `interfaces`):
+
+- `--interface-distance <Å>` — chain-pair contact cutoff (default `8.0`)
+- `--interface-area-distance <Å>` — interface patch area cutoff (default `5.0`)
+- `--interface-sc-distance <Å>` — shape complementarity surface cutoff (default `5.0`)
+
 Emitted features include counts (atoms, residues, chains, ligands), graph
 metrics (contacts, density, clustering), geometry (radius of gyration, SASA),
 secondary-structure composition, typed-interaction counts, protein–ligand
-interaction counts, binding-site residue count, ligand SASA, and
-buried/exposed residue counts.
+interaction counts, binding-site residue count, ligand SASA, buried/exposed
+residue counts, and protein–protein interface summaries (pair count, total
+and max BSA/area/SC, largest-interface chain IDs).
 
 ## ligands
 
@@ -46,6 +54,17 @@ interaction counts).
 structscope ligands 1nkd.cif.gz
 structscope ligands complex.cif.gz --out ligands.jsonl
 structscope ligands complex.cif.gz --ligand-include HEM,NAG --binding-distance 4.0
+```
+
+## interfaces
+
+Emit one JSON record per contacting chain pair (BSA, interface patch area,
+shape complementarity, contact and residue counts).
+
+```
+structscope interfaces 1nkd.cif.gz
+structscope interfaces dimer.pdb --out interfaces.jsonl
+structscope interfaces dimer.pdb --interface-distance 8.0 --interface-area-distance 5.0
 ```
 
 ## residues
