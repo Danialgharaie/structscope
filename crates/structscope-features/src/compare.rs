@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Result};
-use serde_json::Value;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
 use structscope_core::{superposition_rmsd, RmsdParams, Structure};
 
 use crate::FeatureRecord;
@@ -154,6 +155,71 @@ fn value_as_f64(value: &Value) -> Option<f64> {
     }
 }
 
+pub fn numeric_feature_keys(record: &FeatureRecord) -> Vec<String> {
+    let mut keys: Vec<String> = record
+        .features
+        .iter()
+        .filter(|(_, value)| value.is_number())
+        .map(|(key, _)| key.clone())
+        .collect();
+    keys.sort();
+    keys
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeltaRecord {
+    pub structure_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
+    #[serde(flatten)]
+    pub fields: Map<String, Value>,
+}
+
+pub fn feature_deltas(
+    records: &[FeatureRecord],
+    ref_idx: usize,
+    fields: Option<&[String]>,
+) -> Vec<DeltaRecord> {
+    let ref_record = &records[ref_idx];
+    let field_names: Vec<String> = match fields {
+        Some(names) => names.to_vec(),
+        None => {
+            let mut keys: Vec<String> = records
+                .iter()
+                .flat_map(numeric_feature_keys)
+                .collect();
+            keys.sort();
+            keys.dedup();
+            keys
+        }
+    };
+
+    records
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| *index != ref_idx)
+        .map(|(_, record)| {
+            let mut delta_fields = Map::new();
+            for field in &field_names {
+                let Some(value) = record.features.get(field).and_then(value_as_f64) else {
+                    continue;
+                };
+                let Some(ref_value) = ref_record.features.get(field).and_then(value_as_f64) else {
+                    continue;
+                };
+                delta_fields.insert(field.clone(), json!(value));
+                delta_fields.insert(format!("reference_{field}"), json!(ref_value));
+                delta_fields.insert(format!("delta_{field}"), json!(value - ref_value));
+            }
+            DeltaRecord {
+                structure_id: record.structure_id.clone(),
+                source_path: record.source_path.clone(),
+                fields: delta_fields,
+            }
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct RmsdMatrix {
     pub labels: Vec<String>,
@@ -229,6 +295,36 @@ mod tests {
         let index = pick_reference_index(&records, &paths, &ReferenceMode::AutoQuality).unwrap();
 
         assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn numeric_feature_keys_returns_sorted_numeric_fields() {
+        let mut features = Map::new();
+        features.insert("sasa_total".to_string(), json!(100.0));
+        features.insert("centroid".to_string(), json!([1.0, 2.0, 3.0]));
+        features.insert("residue_count".to_string(), json!(42));
+        let record = feature_record("test", features);
+
+        assert_eq!(
+            numeric_feature_keys(&record),
+            vec!["residue_count".to_string(), "sasa_total".to_string()]
+        );
+    }
+
+    #[test]
+    fn feature_deltas_compute_sasa_total_difference() {
+        let records = vec![
+            sasa_record("ref", 1180.0),
+            sasa_record("mob", 1200.0),
+        ];
+
+        let deltas = feature_deltas(&records, 0, Some(&["sasa_total".to_string()]));
+
+        assert_eq!(deltas.len(), 1);
+        assert_eq!(deltas[0].structure_id, "mob");
+        assert_eq!(deltas[0].fields["sasa_total"].as_f64(), Some(1200.0));
+        assert_eq!(deltas[0].fields["reference_sasa_total"].as_f64(), Some(1180.0));
+        assert_eq!(deltas[0].fields["delta_sasa_total"].as_f64(), Some(20.0));
     }
 
     #[test]
