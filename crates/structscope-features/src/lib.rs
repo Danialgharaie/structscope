@@ -19,7 +19,12 @@ pub struct FeatureRecord {
     pub features: Map<String, Value>,
 }
 
-pub fn compute_features(structure: &Structure, filter: &LigandFilter, binding_distance: f64) -> FeatureRecord {
+pub fn compute_features(
+    structure: &Structure,
+    filter: &LigandFilter,
+    binding_distance: f64,
+    interface_params: &interface::InterfaceParams,
+) -> FeatureRecord {
     let summary = structure.summary();
     let residue_graph = build_residue_graph(structure, 8.0, None);
     let interface_graph = build_interface_graph(structure, 8.0, None);
@@ -137,6 +142,17 @@ pub fn compute_features(structure: &Structure, filter: &LigandFilter, binding_di
         json!(pl.protein_ligand_contact_count),
     );
 
+    let iface = interface::protein_interface_summary(structure, interface_params);
+    features.insert("interface_pair_count".to_string(), json!(iface.interface_pair_count));
+    features.insert("interface_bsa_total".to_string(), json!(iface.interface_bsa_total));
+    features.insert("interface_area_total".to_string(), json!(iface.interface_area_total));
+    features.insert("interface_sc_mean".to_string(), json!(iface.interface_sc_mean));
+    features.insert("interface_bsa_max".to_string(), json!(iface.interface_bsa_max));
+    features.insert("interface_area_max".to_string(), json!(iface.interface_area_max));
+    features.insert("interface_sc_max".to_string(), json!(iface.interface_sc_max));
+    features.insert("interface_chain_a".to_string(), json!(iface.interface_chain_a));
+    features.insert("interface_chain_b".to_string(), json!(iface.interface_chain_b));
+
     FeatureRecord {
         structure_id: structure.id.clone(),
         source_path: structure.metadata.source_path.clone(),
@@ -244,10 +260,19 @@ ATOM      2  CA  GLY A   1      12.000  12.500   8.000  1.00 20.00           C
 ATOM      3  C   GLY A   2      13.100  12.800   8.900  1.00 20.00           C
 ";
 
+    fn default_interface_params() -> interface::InterfaceParams {
+        interface::InterfaceParams {
+            contact_distance: 8.0,
+            area_distance: 5.0,
+            sc_distance: 5.0,
+        }
+    }
+
     #[test]
     fn computes_basic_features() {
         let structure = parse_str(PDB_SAMPLE, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
-        let record = compute_features(&structure, &LigandFilter::default(), 5.0);
+        let params = default_interface_params();
+        let record = compute_features(&structure, &LigandFilter::default(), 5.0, &params);
         assert_eq!(record.features["atom_count"].as_u64(), Some(3));
         assert_eq!(record.features["residue_count"].as_u64(), Some(2));
         assert!(record.features["radius_of_gyration"].as_f64().unwrap() >= 0.0);
@@ -261,8 +286,22 @@ HETATM    2  C1  HEM A 501       4.000   0.000   0.000  1.00 0.00           C
 HETATM    3  O   HOH A 502      20.000   0.000   0.000  1.00 0.00           O
 ";
         let structure = parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
-        let record = compute_features(&structure, &LigandFilter::default(), 5.0);
+        let params = default_interface_params();
+        let record = compute_features(&structure, &LigandFilter::default(), 5.0, &params);
         assert_eq!(record.features["ligand_count"].as_u64(), Some(1));
         assert!(record.features["ligand_sasa_total"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn includes_interface_features_for_dimer() {
+        let pdb = "\
+ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 0.00           C
+ATOM      2  CA  ALA B   1       3.500   0.000   0.000  1.00 0.00           C
+";
+        let structure = parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
+        let params = default_interface_params();
+        let record = compute_features(&structure, &LigandFilter::default(), 5.0, &params);
+        assert_eq!(record.features["interface_pair_count"].as_u64(), Some(1));
+        assert!(record.features["interface_bsa_total"].as_f64().unwrap() > 0.0);
     }
 }

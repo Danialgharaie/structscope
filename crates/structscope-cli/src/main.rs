@@ -243,6 +243,11 @@ fn cmd_featurize(
     };
 
     let tx_mutex = std::sync::Mutex::new(tx);
+    let iface_params = structscope_features::interface::InterfaceParams {
+        contact_distance: 8.0,
+        area_distance: 5.0,
+        sc_distance: 5.0,
+    };
 
     let records: Vec<_> = inputs
         .par_iter()
@@ -257,7 +262,7 @@ fn cmd_featurize(
 
             match parse_file(path, ParseOptions::default()) {
                 Ok(structure) => {
-                    let record = compute_features(&structure, &filter, binding_distance);
+                    let record = compute_features(&structure, &filter, binding_distance, &iface_params);
                     if provenance {
                         let _ = tx_mutex.lock().unwrap().send(Event::new(
                             "feature_complete",
