@@ -11,7 +11,7 @@ you used.
   year      = {2026},
   publisher = {GitHub},
   url       = {https://github.com/Danialgharaie/structscope},
-  version   = {0.4.0},
+  version   = {0.4.1},
   note      = {Work in progress. APIs and output schemas may change between releases.}
 }
 ```

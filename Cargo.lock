@@ -2276,14 +2276,14 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "structscope-agent"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "structscope-cli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2301,7 +2301,7 @@ dependencies = [
 
 [[package]]
 name = "structscope-core"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "flate2",
@@ -2313,7 +2313,7 @@ dependencies = [
 
 [[package]]
 name = "structscope-events"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "chrono",
  "serde",
@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "structscope-features"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "petgraph",
@@ -2334,7 +2334,7 @@ dependencies = [
 
 [[package]]
 name = "structscope-graphs"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "petgraph",
  "serde",
@@ -2344,7 +2344,7 @@ dependencies = [
 
 [[package]]
 name = "structscope-provenance"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2357,7 +2357,7 @@ dependencies = [
 
 [[package]]
 name = "structscope-store"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "anyhow",
  "arrow",

@@ -5,6 +5,14 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-06-11
+
+### Added
+
+- GitHub Release Linux x86_64 binary (`structscope-*-x86_64-unknown-linux-gnu.tar.gz`)
+  on version tags.
+- crates.io publishing for workspace crates (`cargo install structscope-cli`).
+
 ## [0.4.0] - 2026-06-11
 
 ### Added
