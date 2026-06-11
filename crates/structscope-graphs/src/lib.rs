@@ -489,6 +489,56 @@ fn residue_centroid(residue: &Residue) -> (f64, f64, f64) {
     (sum_x / count, sum_y / count, sum_z / count)
 }
 
+fn is_heavy_atom(atom: &structscope_core::Atom) -> bool {
+    if let Some(elem) = &atom.element {
+        return !elem.trim().eq_ignore_ascii_case("H");
+    }
+    !atom.name.trim().starts_with('H')
+}
+
+pub fn min_heavy_atom_residue_distance(left: &Residue, right: &Residue) -> f64 {
+    let mut min = f64::INFINITY;
+    for la in left.atoms.iter().filter(|a| is_heavy_atom(a)) {
+        for ra in right.atoms.iter().filter(|a| is_heavy_atom(a)) {
+            let dx = la.x - ra.x;
+            let dy = la.y - ra.y;
+            let dz = la.z - ra.z;
+            min = min.min((dx * dx + dy * dy + dz * dz).sqrt());
+        }
+    }
+    min
+}
+
+/// Unique chain-label pairs (a <= b lexicographically) with any inter-chain residue contact.
+pub fn contacting_chain_pairs(structure: &Structure, threshold_angstroms: f64) -> Vec<(String, String)> {
+    let chains: Vec<(&str, &[_])> = structure
+        .chains
+        .iter()
+        .map(|c| (c.label.as_str(), c.residues.as_slice()))
+        .collect();
+    let mut pairs = Vec::new();
+    for i in 0..chains.len() {
+        for j in (i + 1)..chains.len() {
+            let (label_i, res_i) = chains[i];
+            let (label_j, res_j) = chains[j];
+            let contacts = res_i.iter().any(|ra| {
+                res_j.iter().any(|rb| {
+                    min_heavy_atom_residue_distance(ra, rb) <= threshold_angstroms
+                })
+            });
+            if contacts {
+                let (a, b) = if label_i <= label_j {
+                    (label_i.to_string(), label_j.to_string())
+                } else {
+                    (label_j.to_string(), label_i.to_string())
+                };
+                pairs.push((a, b));
+            }
+        }
+    }
+    pairs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -546,5 +596,30 @@ ATOM      3  CA  ALA B   1       2.000   0.000   0.000  1.00 0.00           C
         let graph = build_residue_graph(&structure, 8.0, Some(&interactions));
         let edge_idx = graph.find_edge(NodeIndex::new(0), NodeIndex::new(1)).unwrap();
         assert_eq!(graph[edge_idx].kind, "covalent_adjacency");
+    }
+
+    #[test]
+    fn min_heavy_atom_residue_distance_uses_heavy_atoms_only() {
+        let pdb = "\
+ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 0.00           C
+ATOM      2  CA  ALA B   1       4.000   0.000   0.000  1.00 0.00           C
+";
+        let s = parse(pdb);
+        let a = &s.chains[0].residues[0];
+        let b = &s.chains[1].residues[0];
+        assert!((min_heavy_atom_residue_distance(a, b) - 4.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn contacting_pairs_omits_distant_chains() {
+        let pdb = "\
+ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 0.00           C
+ATOM      2  CA  ALA B   1       4.000   0.000   0.000  1.00 0.00           C
+ATOM      3  CA  GLY C   1      40.000   0.000   0.000  1.00 0.00           C
+";
+        let s = parse(pdb);
+        let pairs = contacting_chain_pairs(&s, 8.0);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0], ("A".to_string(), "B".to_string()));
     }
 }
