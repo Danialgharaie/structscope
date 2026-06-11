@@ -5,6 +5,15 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-11
+
+### Added
+
+- Golden fixtures and regression tests for structure quality metrics
+  (`tests/fixtures/quality/`, `quality_golden.rs`).
+
+## [0.3.0] - 2026-06-11
+
 ### Added
 
 - Structure quality metrics: MolProbity-style Ramachandran classification
