@@ -1,0 +1,20 @@
+{
+  "pdb": "ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 0.00           N\nATOM      2  CA  ALA A   1       1.458   0.000   0.000  1.00 0.00           C\nATOM      3  C   ALA A   1       2.009   1.420   0.000  1.00 0.00           C\nATOM      4  O   ALA A   1       2.500   2.200   0.000  1.00 0.00           O\nATOM      5  N   ALA A   2       3.332   1.540   0.000  1.00 0.00           N\nATOM      6  CA  ALA A   2       3.970   2.840   0.000  1.00 0.00           C\nATOM      7  C   ALA A   2       5.480   2.700   0.000  1.00 0.00           C\nATOM      8  O   ALA A   2       6.000   3.600   0.000  1.00 0.00           O\n",
+  "params": {
+    "clash_overlap": 0.4
+  },
+  "expected": {
+    "summary": {
+      "quality_residue_count": 2,
+      "ramachandran_evaluated_count": 0,
+      "ramachandran_favored_count": 0,
+      "ramachandran_allowed_count": 0,
+      "ramachandran_outlier_count": 0,
+      "clash_pair_count": 0,
+      "missing_backbone_residue_count": 0
+    },
+    "problems_only_count": 0,
+    "problems": [],
+    "all_residues_count": 2
+  }
+}

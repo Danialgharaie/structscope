@@ -92,7 +92,7 @@ fn collect_evaluated(structure: &Structure) -> Vec<EvaluatedResidue<'_>> {
 
     let mut out = Vec::new();
     for chain in &structure.chains {
-        for (residue_index, residue) in chain.residues.iter().enumerate() {
+        for (_residue_index, residue) in chain.residues.iter().enumerate() {
             if !is_quality_residue(&residue.name) {
                 continue;
             }
