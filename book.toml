@@ -8,3 +8,4 @@ language = "en"
 [output.html]
 default-theme = "rust"
 git-repository-url = "https://github.com/Danialgharaie/structscope"
+site-url = "/structscope/"

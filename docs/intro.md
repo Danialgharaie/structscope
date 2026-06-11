@@ -1,7 +1,7 @@
 # structscope
 
 <p align="center">
-  <img src="../assets/structscope-logo.svg" alt="structscope" width="360">
+  <img src="img/structscope-logo.svg" alt="structscope" width="360">
 </p>
 
 > **Work in progress** — APIs, CLI flags, and output schemas may change between

@@ -8,5 +8,6 @@ Branding files for README, documentation, and GitHub.
 | `structscope-icon.svg` / `.png` | Square mark, social previews |
 | `structscope-icon-256.png` | App icon / profile image |
 | `structscope-favicon-64.png` | Copied to `docs/favicon.png` for mdBook |
+| `structscope-logo.svg` | Copied to `docs/img/structscope-logo.svg` for mdBook (avoid `/assets/` clash on GitHub Pages) |
 
 SVG preferred for web; PNG for contexts that do not render SVG.
