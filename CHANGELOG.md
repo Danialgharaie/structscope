@@ -5,6 +5,19 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+### Added
+
+- Structure quality metrics: MolProbity-style Ramachandran classification
+  (favored / allowed / outlier, with Gly/Pro regions), steric clash detection
+  (heavy atoms, configurable VdW overlap), and missing backbone atom checks
+  (N, CA, C, O) over canonical and common variant residues.
+- CLI command:
+  - `quality <input>` — per-residue quality records as JSONL (problems only
+    by default; `--all-residues` for full output).
+- Structure-level quality aggregates in `featurize`: `quality_residue_count`,
+  Ramachandran counts, `clash_pair_count`, and `missing_backbone_residue_count`.
+- `--clash-overlap` flag on `featurize` and `quality` (default `0.4` Å).
+
 ## [0.2.0] - 2026-06-11
 
 ### Added

@@ -10,7 +10,7 @@ use structscope_core::{kabsch, needleman_wunsch, parse_file, smith_waterman, thr
 use structscope_events::Event;
 use structscope_features::{
     compute_features, interface::per_interface_features, ligand::per_ligand_features,
-    per_residue::per_residue_features,
+    per_residue::per_residue_features, quality::per_residue_quality,
 };
 use structscope_graphs::{
     atom_id_to_residue_id, build_atom_graph, build_interface_graph, build_residue_graph,
@@ -80,6 +80,27 @@ fn validate_interface_distances(args: &InterfaceCliArgs) -> Result<()> {
     Ok(())
 }
 
+#[derive(Parser, Clone, Default)]
+struct QualityCliArgs {
+    #[arg(long, default_value_t = 0.4)]
+    clash_overlap: f64,
+    #[arg(long, default_value = "false")]
+    all_residues: bool,
+}
+
+fn build_quality_params(args: &QualityCliArgs) -> structscope_features::quality::QualityParams {
+    structscope_features::quality::QualityParams {
+        clash_overlap: args.clash_overlap,
+    }
+}
+
+fn validate_clash_overlap(overlap: f64) -> Result<()> {
+    if overlap < 0.0 {
+        anyhow::bail!("clash overlap must be non-negative, got {overlap}");
+    }
+    Ok(())
+}
+
 #[derive(Subcommand)]
 enum Commands {
     Parse {
@@ -107,6 +128,8 @@ enum Commands {
         ligand: LigandCliArgs,
         #[command(flatten)]
         interface: InterfaceCliArgs,
+        #[command(flatten)]
+        quality: QualityCliArgs,
     },
     /// Emit per-ligand features (SASA, binding-site residues, interaction counts) as JSONL.
     Ligands {
@@ -123,6 +146,14 @@ enum Commands {
         out: Option<PathBuf>,
         #[command(flatten)]
         interface: InterfaceCliArgs,
+    },
+    /// Emit per-residue structure quality (Ramachandran, clashes, missing backbone) as JSONL.
+    Quality {
+        input: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[command(flatten)]
+        quality: QualityCliArgs,
     },
     Graph {
         input: PathBuf,
@@ -187,9 +218,11 @@ fn main() -> Result<()> {
             jobs,
             ligand,
             interface,
-        } => cmd_featurize(&input, &out, provenance, sqlite, jsonl, guard, jobs, &ligand, &interface),
+            quality,
+        } => cmd_featurize(&input, &out, provenance, sqlite, jsonl, guard, jobs, &ligand, &interface, &quality),
         Commands::Ligands { input, out, ligand } => cmd_ligands(&input, out, &ligand),
         Commands::Interfaces { input, out, interface } => cmd_interfaces(&input, out, &interface),
+        Commands::Quality { input, out, quality } => cmd_quality(&input, out, &quality),
         Commands::Graph {
             input,
             graph_type,
@@ -238,9 +271,11 @@ fn cmd_featurize(
     jobs: Option<usize>,
     ligand_args: &LigandCliArgs,
     interface_args: &InterfaceCliArgs,
+    quality_args: &QualityCliArgs,
 ) -> Result<()> {
     validate_binding_distance(ligand_args.binding_distance)?;
     validate_interface_distances(interface_args)?;
+    validate_clash_overlap(quality_args.clash_overlap)?;
     let filter = build_ligand_filter(ligand_args);
     let binding_distance = ligand_args.binding_distance;
     let inputs = collect_inputs(input)?;
@@ -286,6 +321,7 @@ fn cmd_featurize(
 
     let tx_mutex = std::sync::Mutex::new(tx);
     let iface_params = build_interface_params(interface_args);
+    let quality_params = build_quality_params(quality_args);
 
     let records: Vec<_> = inputs
         .par_iter()
@@ -300,7 +336,13 @@ fn cmd_featurize(
 
             match parse_file(path, ParseOptions::default()) {
                 Ok(structure) => {
-                    let record = compute_features(&structure, &filter, binding_distance, &iface_params);
+                    let record = compute_features(
+                        &structure,
+                        &filter,
+                        binding_distance,
+                        &iface_params,
+                        &quality_params,
+                    );
                     if provenance {
                         let _ = tx_mutex.lock().unwrap().send(Event::new(
                             "feature_complete",
@@ -542,6 +584,21 @@ fn cmd_ligands(input: &Path, out: Option<PathBuf>, ligand_args: &LigandCliArgs) 
     let structure = parse_file(input, ParseOptions::default())?;
     let filter = build_ligand_filter(ligand_args);
     let records = per_ligand_features(&structure, &filter, ligand_args.binding_distance);
+    let mut writer: Box<dyn Write> = match out {
+        Some(path) => Box::new(fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+    for record in records {
+        writeln!(writer, "{}", serde_json::to_string(&record)?)?;
+    }
+    Ok(())
+}
+
+fn cmd_quality(input: &Path, out: Option<PathBuf>, args: &QualityCliArgs) -> Result<()> {
+    validate_clash_overlap(args.clash_overlap)?;
+    let structure = parse_file(input, ParseOptions::default())?;
+    let params = build_quality_params(args);
+    let records = per_residue_quality(&structure, &params, args.all_residues);
     let mut writer: Box<dyn Write> = match out {
         Some(path) => Box::new(fs::File::create(path)?),
         None => Box::new(std::io::stdout()),

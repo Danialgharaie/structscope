@@ -6,9 +6,11 @@ use structscope_graphs::{build_interface_graph, build_residue_graph};
 pub mod dihedral;
 pub mod interactions;
 pub mod interface;
-pub mod ligand;
 pub mod lc89;
+pub mod ligand;
 pub mod per_residue;
+pub mod quality;
+pub mod ramachandran;
 pub mod sasa;
 pub mod ss;
 
@@ -24,6 +26,7 @@ pub fn compute_features(
     filter: &LigandFilter,
     binding_distance: f64,
     interface_params: &interface::InterfaceParams,
+    quality_params: &quality::QualityParams,
 ) -> FeatureRecord {
     let summary = structure.summary();
     let residue_graph = build_residue_graph(structure, 8.0, None);
@@ -153,6 +156,15 @@ pub fn compute_features(
     features.insert("interface_chain_a".to_string(), json!(iface.interface_chain_a));
     features.insert("interface_chain_b".to_string(), json!(iface.interface_chain_b));
 
+    let qc = quality::quality_summary(structure, quality_params);
+    features.insert("quality_residue_count".to_string(), json!(qc.quality_residue_count));
+    features.insert("ramachandran_evaluated_count".to_string(), json!(qc.ramachandran_evaluated_count));
+    features.insert("ramachandran_favored_count".to_string(), json!(qc.ramachandran_favored_count));
+    features.insert("ramachandran_allowed_count".to_string(), json!(qc.ramachandran_allowed_count));
+    features.insert("ramachandran_outlier_count".to_string(), json!(qc.ramachandran_outlier_count));
+    features.insert("clash_pair_count".to_string(), json!(qc.clash_pair_count));
+    features.insert("missing_backbone_residue_count".to_string(), json!(qc.missing_backbone_residue_count));
+
     FeatureRecord {
         structure_id: structure.id.clone(),
         source_path: structure.metadata.source_path.clone(),
@@ -268,11 +280,20 @@ ATOM      3  C   GLY A   2      13.100  12.800   8.900  1.00 20.00           C
         }
     }
 
+    fn default_quality_params() -> quality::QualityParams {
+        quality::QualityParams { clash_overlap: 0.4 }
+    }
+
     #[test]
     fn computes_basic_features() {
         let structure = parse_str(PDB_SAMPLE, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
-        let params = default_interface_params();
-        let record = compute_features(&structure, &LigandFilter::default(), 5.0, &params);
+        let record = compute_features(
+            &structure,
+            &LigandFilter::default(),
+            5.0,
+            &default_interface_params(),
+            &default_quality_params(),
+        );
         assert_eq!(record.features["atom_count"].as_u64(), Some(3));
         assert_eq!(record.features["residue_count"].as_u64(), Some(2));
         assert!(record.features["radius_of_gyration"].as_f64().unwrap() >= 0.0);
@@ -286,8 +307,13 @@ HETATM    2  C1  HEM A 501       4.000   0.000   0.000  1.00 0.00           C
 HETATM    3  O   HOH A 502      20.000   0.000   0.000  1.00 0.00           O
 ";
         let structure = parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
-        let params = default_interface_params();
-        let record = compute_features(&structure, &LigandFilter::default(), 5.0, &params);
+        let record = compute_features(
+            &structure,
+            &LigandFilter::default(),
+            5.0,
+            &default_interface_params(),
+            &default_quality_params(),
+        );
         assert_eq!(record.features["ligand_count"].as_u64(), Some(1));
         assert!(record.features["ligand_sasa_total"].as_f64().unwrap() > 0.0);
     }
@@ -299,9 +325,33 @@ ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 0.00           C
 ATOM      2  CA  ALA B   1       3.500   0.000   0.000  1.00 0.00           C
 ";
         let structure = parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
-        let params = default_interface_params();
-        let record = compute_features(&structure, &LigandFilter::default(), 5.0, &params);
+        let record = compute_features(
+            &structure,
+            &LigandFilter::default(),
+            5.0,
+            &default_interface_params(),
+            &default_quality_params(),
+        );
         assert_eq!(record.features["interface_pair_count"].as_u64(), Some(1));
         assert!(record.features["interface_bsa_total"].as_f64().unwrap() > 0.0);
+    }
+
+    #[test]
+    fn includes_quality_features() {
+        let pdb = "\
+ATOM      1  N   ALA A   1       0.000   0.000   0.000  1.00 0.00           N
+ATOM      2  CA  ALA A   1       1.458   0.000   0.000  1.00 0.00           C
+ATOM      3  C   ALA A   1       2.009   1.420   0.000  1.00 0.00           C
+";
+        let structure = parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
+        let record = compute_features(
+            &structure,
+            &LigandFilter::default(),
+            5.0,
+            &default_interface_params(),
+            &default_quality_params(),
+        );
+        assert_eq!(record.features["quality_residue_count"].as_u64(), Some(1));
+        assert_eq!(record.features["missing_backbone_residue_count"].as_u64(), Some(1));
     }
 }

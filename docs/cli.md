@@ -38,12 +38,19 @@ Optional interface flags (also on `interfaces`):
 - `--interface-area-distance <Å>` — interface patch area cutoff (default `5.0`)
 - `--interface-sc-distance <Å>` — shape complementarity surface cutoff (default `5.0`)
 
+Optional quality flags (also on `quality`):
+
+- `--clash-overlap <Å>` — VdW overlap threshold for steric clashes (default `0.4`)
+- `--all-residues` — emit every evaluated residue, not just problems (default: problems only)
+
 Emitted features include counts (atoms, residues, chains, ligands), graph
 metrics (contacts, density, clustering), geometry (radius of gyration, SASA),
 secondary-structure composition, typed-interaction counts, protein–ligand
 interaction counts, binding-site residue count, ligand SASA, buried/exposed
-residue counts, and protein–protein interface summaries (pair count, total
-and max BSA/area/SC, largest-interface chain IDs).
+residue counts, protein–protein interface summaries (pair count, total
+and max BSA/area/SC, largest-interface chain IDs), and structure quality
+summaries (Ramachandran favored/allowed/outlier counts, clash pairs, missing
+backbone residues).
 
 ## ligands
 
@@ -65,6 +72,18 @@ shape complementarity, contact and residue counts).
 structscope interfaces 1nkd.cif.gz
 structscope interfaces dimer.pdb --out interfaces.jsonl
 structscope interfaces dimer.pdb --interface-distance 8.0 --interface-area-distance 5.0
+```
+
+## quality
+
+Emit per-residue structure quality (Ramachandran classification, steric
+clashes, missing backbone atoms) as JSONL. By default only problem residues
+are emitted; use `--all-residues` for the full table.
+
+```
+structscope quality 1nkd.cif.gz
+structscope quality model.pdb --out quality.jsonl
+structscope quality model.pdb --clash-overlap 0.4 --all-residues
 ```
 
 ## residues
