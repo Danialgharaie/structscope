@@ -3,6 +3,7 @@ use serde_json::{json, Map, Value};
 use structscope_core::{LigandFilter, Structure};
 use structscope_graphs::{build_interface_graph, build_residue_graph};
 
+pub mod compare;
 pub mod dihedral;
 pub mod interactions;
 pub mod interface;
