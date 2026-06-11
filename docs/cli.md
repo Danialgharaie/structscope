@@ -100,7 +100,7 @@ structscope residues 1nkd.cif.gz --out residues.jsonl
 
 Compare two or more structures: pairwise RMSD matrix (CA atoms with sequence
 alignment by default) and numeric feature deltas against a chosen reference.
-Accepts a single file or a directory of structures.
+Accepts a single file or a directory of structures (minimum two inputs).
 
 ```
 structscope compare ./models
@@ -109,11 +109,34 @@ structscope compare ./models --auto-reference
 structscope compare ./models --reference-by min:ramachandran_outlier_count
 structscope compare ./models --delta-fields sasa_total,interface_bsa_total --out ./compare-out
 structscope compare ./models --out ./compare-out --format csv
+structscope compare ./models --atoms backbone --local --reference #0
 ```
 
-Reference selection (first match wins): `--reference`, `--reference-by`,
-`--auto-reference`, else the first input file. Optional ligand, interface, and
-quality flags match `featurize`.
+Without `--out`, prints a single JSON object to stdout (matrix, deltas, reference
+metadata, and any parse failures). With `--out`:
+
+- `--format json` (default): `matrix.json` and `deltas.jsonl`
+- `--format csv`: `matrix.csv` and `deltas.csv`
+
+Reference selection (first match wins):
+
+- `--reference PATH|#INDEX` — explicit path, basename, structure ID, or input index
+- `--reference-by min:field` or `max:field` — pick by a numeric featurize field
+- `--auto-reference` — lowest Ramachandran outliers, then clashes, then missing backbone
+- else the first successfully parsed input
+
+RMSD correspondence flags (same semantics as `rmsd`):
+
+- `--atoms ca|backbone|all` — atom selection (default `ca`)
+- `--align` — sequence-based residue correspondence (default on)
+- `--local` — Smith-Waterman local alignment for partial overlaps
+
+Optional flags shared with `featurize`:
+
+- `--delta-fields FIELD[,FIELD...]` — limit delta columns (default: all numeric features)
+- ligand: `--ligand-exclude`, `--ligand-include`, `--binding-distance`
+- interface: `--interface-distance`, `--interface-area-distance`, `--interface-sc-distance`
+- quality: `--clash-overlap`
 
 ## rmsd
 

@@ -12,11 +12,12 @@ This repository currently contains a bootstrap implementation with:
 - configurable ligand identification (`LigandFilter` with default denylist and CLI overrides) and protein–ligand features: binding-site residues, cross-boundary interaction counts, and ligand SASA
 - protein–protein interface metrics (BSA, interface patch area, Lawrence–Colman shape complementarity) with structure-level aggregates in `featurize` and per chain-pair JSONL via `interfaces`; distance cutoffs via `--interface-distance`, `--interface-area-distance`, and `--interface-sc-distance`
 - structure quality checks (Ramachandran favored/allowed/outlier, steric clashes, missing backbone) with structure-level aggregates in `featurize` and per-residue JSONL via `quality`; clash threshold via `--clash-overlap`
+- multi-structure compare: pairwise RMSD matrix and feature deltas vs a reference (`compare`), with flexible reference selection and JSON or CSV output
 - basic and graph-derived feature extraction, with parallel batch `featurize` via `--jobs` / `-j`
 - JSONL and Parquet feature export
 - DuckDB-backed SQL querying over feature Parquet (build with `--features duckdb`)
 - optional SQLite/JSONL provenance
-- CLI entrypoints for parse, featurize, interfaces, ligands, quality, graph, query, rmsd, residues, and provenance
+- CLI entrypoints for parse, featurize, compare, interfaces, ligands, quality, graph, query, rmsd, residues, and provenance
 
 Querying is gated behind a Cargo feature because it bundles DuckDB:
 

@@ -5,6 +5,23 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-11
+
+### Added
+
+- Multi-structure compare: pairwise RMSD matrix (CA atoms with sequence
+  alignment by default) and numeric feature deltas against a chosen reference.
+- CLI command:
+  - `compare <input>` — compare two or more structures from a file or
+    directory; prints JSON to stdout or writes `matrix.json` + `deltas.jsonl`
+    (or `matrix.csv` + `deltas.csv` with `--format csv`) to `--out`.
+- Reference selection (first match wins): `--reference`, `--reference-by
+  min:field|max:field`, `--auto-reference` (lowest Ramachandran outliers,
+  clashes, missing backbone), else first input.
+- `--delta-fields` to restrict feature delta columns; `--atoms`, `--align`,
+  and `--local` for RMSD correspondence (same semantics as `rmsd`).
+- Ligand, interface, and quality flags shared with `featurize`.
+
 ## [0.3.1] - 2026-06-11
 
 ### Added
