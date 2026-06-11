@@ -3,6 +3,14 @@ name = "structscope-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description = "CLI for the structscope structural bioinformatics toolkit"
+readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories = ["command-line-utilities", "science"]
 
 [[bin]]
 name = "structscope"
@@ -18,10 +26,10 @@ clap.workspace = true
 serde_json.workspace = true
 walkdir.workspace = true
 rayon.workspace = true
-structscope-agent = { path = "../structscope-agent" }
-structscope-core = { path = "../structscope-core" }
-structscope-events = { path = "../structscope-events" }
-structscope-features = { path = "../structscope-features" }
-structscope-graphs = { path = "../structscope-graphs" }
-structscope-provenance = { path = "../structscope-provenance" }
-structscope-store = { path = "../structscope-store" }
+structscope-agent.workspace = true
+structscope-core.workspace = true
+structscope-events.workspace = true
+structscope-features.workspace = true
+structscope-graphs.workspace = true
+structscope-provenance.workspace = true
+structscope-store.workspace = true

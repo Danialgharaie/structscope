@@ -34,6 +34,16 @@ cargo build -p structscope-cli --features duckdb
 structscope query <features.parquet|out-dir> --sql "SELECT * FROM features"
 ```
 
+## Install
+
+From crates.io (builds from source):
+
+```
+cargo install structscope-cli
+```
+
+Prebuilt Linux x86_64 binaries are attached to [GitHub Releases](https://github.com/Danialgharaie/structscope/releases) (`structscope-*-x86_64-unknown-linux-gnu.tar.gz`).
+
 Feature records are exposed to SQL as a `features` table.
 
 Per-ligand JSONL output:

@@ -3,11 +3,19 @@ name = "structscope-features"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+description.workspace = true
+readme.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [dependencies]
 anyhow.workspace = true
 petgraph.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-structscope-core = { path = "../structscope-core" }
-structscope-graphs = { path = "../structscope-graphs" }
+structscope-core.workspace = true
+structscope-graphs.workspace = true
