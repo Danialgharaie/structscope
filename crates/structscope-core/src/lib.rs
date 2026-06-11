@@ -3,9 +3,11 @@ mod bcif;
 mod ligand_filter;
 mod model;
 mod parser;
+mod rmsd;
 mod seqalign;
 
 pub use align::{kabsch, Superposition};
+pub use rmsd::{superposition_rmsd, RmsdError, RmsdParams, RmsdResult};
 pub use ligand_filter::LigandFilter;
 pub use seqalign::{needleman_wunsch, smith_waterman, three_to_one};
 pub use model::{

@@ -6,7 +6,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use structscope_agent::guard_available;
-use structscope_core::{kabsch, needleman_wunsch, parse_file, smith_waterman, three_to_one, LigandFilter, ParseOptions, Structure};
+use structscope_core::{parse_file, superposition_rmsd, LigandFilter, ParseOptions, RmsdParams, Structure};
 use structscope_events::Event;
 use structscope_features::{
     compute_features, interface::per_interface_features, ligand::per_ligand_features,
@@ -497,70 +497,19 @@ fn structure_to_pdb(structure: &Structure) -> String {
 fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str, align: bool, local: bool) -> Result<()> {
     let reference_structure = parse_file(reference, ParseOptions::default())?;
     let mobile_structure = parse_file(mobile, ParseOptions::default())?;
-
-    let (ref_coords, mob_coords) = if align || local {
-        // Residue-level correspondence: align one-letter sequences, pair matched CA atoms.
-        let residues = |s: &Structure| -> (Vec<u8>, Vec<[f64; 3]>) {
-            let mut seq = Vec::new();
-            let mut ca = Vec::new();
-            for r in s.chains.iter().flat_map(|c| &c.residues) {
-                if let Some(a) = r.atoms.iter().find(|a| a.name == "CA") {
-                    seq.push(three_to_one(&r.name));
-                    ca.push([a.x, a.y, a.z]);
-                }
-            }
-            (seq, ca)
-        };
-        let (ref_seq, ref_ca) = residues(&reference_structure);
-        let (mob_seq, mob_ca) = residues(&mobile_structure);
-        let pairs = if local {
-            smith_waterman(&ref_seq, &mob_seq)
-        } else {
-            needleman_wunsch(&ref_seq, &mob_seq)
-        };
-        let matched: Vec<(usize, usize)> = pairs.into_iter().filter(|&(i, j)| ref_seq[i] == mob_seq[j]).collect();
-        if matched.is_empty() {
-            anyhow::bail!("no matching residues found between the two structures");
-        }
-        (
-            matched.iter().map(|&(i, _)| ref_ca[i]).collect::<Vec<_>>(),
-            matched.iter().map(|&(_, j)| mob_ca[j]).collect::<Vec<_>>(),
-        )
-    } else {
-        let select = |s: &Structure| -> Vec<[f64; 3]> {
-            s.chains
-                .iter()
-                .flat_map(|c| &c.residues)
-                .flat_map(|r| &r.atoms)
-                .filter(|a| match atoms {
-                    "ca" => a.name == "CA",
-                    "backbone" => matches!(a.name.as_str(), "N" | "CA" | "C" | "O"),
-                    _ => true,
-                })
-                .map(|a| [a.x, a.y, a.z])
-                .collect()
-        };
-        let r = select(&reference_structure);
-        let m = select(&mobile_structure);
-        if r.len() != m.len() {
-            anyhow::bail!(
-                "atom count mismatch under selection '{atoms}': reference has {}, mobile has {} (use --align for sequence-based correspondence)",
-                r.len(),
-                m.len()
-            );
-        }
-        (r, m)
-    };
-
-    let sp = kabsch(&mob_coords, &ref_coords).context("superposition failed (empty selection?)")?;
-    let mode = if local {
-        "local-ca"
-    } else if align {
-        "aligned-ca"
-    } else {
-        atoms
-    };
-    println!("rmsd={:.4}; atoms={}; selection={mode}", sp.rmsd, ref_coords.len());
+    let result = superposition_rmsd(
+        &reference_structure,
+        &mobile_structure,
+        RmsdParams {
+            atoms: atoms.to_string(),
+            align,
+            local,
+        },
+    )?;
+    println!(
+        "rmsd={:.4}; atoms={}; selection={}",
+        result.rmsd, result.atom_count, result.selection
+    );
     Ok(())
 }
 
