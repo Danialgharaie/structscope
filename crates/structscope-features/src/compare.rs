@@ -1,6 +1,8 @@
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use structscope_core::{superposition_rmsd, RmsdParams, Structure};
@@ -220,10 +222,163 @@ pub fn feature_deltas(
         .collect()
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RmsdMatrix {
     pub labels: Vec<String>,
     pub rmsd: Vec<Vec<Option<f64>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParseFailure {
+    pub path: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompareResult {
+    pub reference_id: String,
+    pub reference_path: String,
+    pub reference_mode: String,
+    pub structure_count: usize,
+    pub structures: Vec<String>,
+    pub matrix: RmsdMatrix,
+    pub deltas: Vec<DeltaRecord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failed: Option<Vec<ParseFailure>>,
+}
+
+pub fn reference_mode_label(mode: &ReferenceMode) -> String {
+    match mode {
+        ReferenceMode::FirstInput => "first_input".to_string(),
+        ReferenceMode::ExplicitPath(_) => "explicit".to_string(),
+        ReferenceMode::AutoQuality => "auto_quality".to_string(),
+        ReferenceMode::ByField { .. } => "reference_by".to_string(),
+    }
+}
+
+pub fn compare_set(
+    structures: &[Structure],
+    records: &[FeatureRecord],
+    paths: &[PathBuf],
+    rmsd_params: &RmsdParams,
+    reference_mode: &ReferenceMode,
+    delta_fields: Option<&[String]>,
+    failed: Option<Vec<ParseFailure>>,
+) -> Result<CompareResult> {
+    if structures.len() != records.len() || structures.len() != paths.len() {
+        bail!(
+            "structures ({}), records ({}), and paths ({}) must have the same length",
+            structures.len(),
+            records.len(),
+            paths.len()
+        );
+    }
+
+    let matrix = rmsd_matrix(structures, rmsd_params);
+    let ref_idx = pick_reference_index(records, paths, reference_mode)?;
+    let deltas = feature_deltas(records, ref_idx, delta_fields);
+    let reference_path = paths[ref_idx].to_string_lossy().into_owned();
+
+    Ok(CompareResult {
+        reference_id: records[ref_idx].structure_id.clone(),
+        reference_path,
+        reference_mode: reference_mode_label(reference_mode),
+        structure_count: structures.len(),
+        structures: matrix.labels.clone(),
+        matrix,
+        deltas,
+        failed,
+    })
+}
+
+pub fn write_compare_json(out_dir: &Path, result: &CompareResult) -> Result<()> {
+    fs::create_dir_all(out_dir)
+        .with_context(|| format!("failed to create output directory {}", out_dir.display()))?;
+
+    let matrix_path = out_dir.join("matrix.json");
+    let matrix_json = serde_json::to_string_pretty(&result.matrix)?;
+    fs::write(&matrix_path, matrix_json)
+        .with_context(|| format!("failed to write {}", matrix_path.display()))?;
+
+    let deltas_path = out_dir.join("deltas.jsonl");
+    let mut writer = BufWriter::new(
+        File::create(&deltas_path)
+            .with_context(|| format!("failed to create {}", deltas_path.display()))?,
+    );
+    for delta in &result.deltas {
+        writeln!(writer, "{}", serde_json::to_string(delta)?)?;
+    }
+    writer.flush()?;
+
+    Ok(())
+}
+
+pub fn write_compare_csv(out_dir: &Path, result: &CompareResult) -> Result<()> {
+    fs::create_dir_all(out_dir)
+        .with_context(|| format!("failed to create output directory {}", out_dir.display()))?;
+
+    write_matrix_csv(&out_dir.join("matrix.csv"), &result.matrix)?;
+    write_deltas_csv(&out_dir.join("deltas.csv"), &result.deltas)?;
+
+    Ok(())
+}
+
+fn write_matrix_csv(path: &Path, matrix: &RmsdMatrix) -> Result<()> {
+    let mut lines = vec![format!(",{}", matrix.labels.join(","))];
+    for (row_index, label) in matrix.labels.iter().enumerate() {
+        let cells: Vec<String> = matrix.rmsd[row_index]
+            .iter()
+            .map(|value| value.map(|v| v.to_string()).unwrap_or_default())
+            .collect();
+        lines.push(format!("{label},{}", cells.join(",")));
+    }
+    fs::write(path, lines.join("\n")).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn write_deltas_csv(path: &Path, deltas: &[DeltaRecord]) -> Result<()> {
+    let mut field_names: Vec<String> = deltas
+        .iter()
+        .flat_map(|delta| delta.fields.keys().cloned())
+        .collect();
+    field_names.sort();
+    field_names.dedup();
+
+    let mut lines = vec![format!(
+        "structure_id,source_path,{}",
+        field_names.join(",")
+    )];
+    for delta in deltas {
+        let source_path = delta.source_path.as_deref().unwrap_or("");
+        let values: Vec<String> = field_names
+            .iter()
+            .map(|field| csv_cell(delta.fields.get(field)))
+            .collect();
+        lines.push(format!(
+            "{},{},{}",
+            csv_cell_str(&delta.structure_id),
+            csv_cell_str(source_path),
+            values.join(",")
+        ));
+    }
+    fs::write(path, lines.join("\n")).with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn csv_cell_str(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn csv_cell(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => csv_cell_str(text),
+        Some(other) => other.to_string(),
+        None => String::new(),
+    }
 }
 
 pub fn rmsd_matrix(structures: &[Structure], params: &RmsdParams) -> RmsdMatrix {
@@ -456,5 +611,135 @@ mod tests {
         let off_diagonal = matrix.rmsd[0][1].expect("expected rmsd value");
         assert!(off_diagonal > 0.0, "rmsd = {off_diagonal}");
         assert_eq!(matrix.rmsd[1][0], Some(off_diagonal));
+    }
+
+    const MINI_PDB: &str = "\
+ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00  0.00           C
+ATOM      2  CA  GLY A   2       1.000   0.000   0.000  1.00  0.00           C
+ATOM      3  CA  VAL A   3       0.000   1.000   0.000  1.00  0.00           C
+";
+
+    fn mini_pdb(offset_x: f64) -> String {
+        MINI_PDB.replace("0.000   0.000   0.000", &format!("{offset_x:.3}   0.000   0.000"))
+    }
+
+    #[test]
+    fn compare_set_assembles_matrix_and_deltas() {
+        use structscope_core::{parse_str, InputFormat, ParseOptions};
+
+        let structures = [
+            parse_str(
+                &mini_pdb(0.0),
+                InputFormat::Pdb,
+                Some("s1.pdb".to_string()),
+                ParseOptions::default(),
+            )
+            .unwrap(),
+            parse_str(
+                &mini_pdb(0.5),
+                InputFormat::Pdb,
+                Some("s2.pdb".to_string()),
+                ParseOptions::default(),
+            )
+            .unwrap(),
+            parse_str(
+                &mini_pdb(1.0),
+                InputFormat::Pdb,
+                Some("s3.pdb".to_string()),
+                ParseOptions::default(),
+            )
+            .unwrap(),
+        ];
+        let records = vec![
+            sasa_record("s1", 1000.0),
+            sasa_record("s2", 1100.0),
+            sasa_record("s3", 1200.0),
+        ];
+        let paths = vec![
+            PathBuf::from("s1.pdb"),
+            PathBuf::from("s2.pdb"),
+            PathBuf::from("s3.pdb"),
+        ];
+
+        let result = compare_set(
+            &structures,
+            &records,
+            &paths,
+            &default_params(),
+            &ReferenceMode::FirstInput,
+            Some(&["sasa_total".to_string()]),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.reference_id, "s1");
+        assert_eq!(result.reference_path, "s1.pdb");
+        assert_eq!(result.reference_mode, "first_input");
+        assert_eq!(result.structure_count, 3);
+        assert_eq!(result.structures, vec!["s1", "s2", "s3"]);
+        assert_eq!(result.matrix.labels.len(), 3);
+        assert_eq!(result.deltas.len(), 2);
+        assert_eq!(result.deltas[0].structure_id, "s2");
+        assert_eq!(result.deltas[0].fields["delta_sasa_total"].as_f64(), Some(100.0));
+        assert_eq!(result.deltas[1].fields["delta_sasa_total"].as_f64(), Some(200.0));
+        assert!(result.failed.is_none());
+
+        for i in 0..3 {
+            assert_eq!(result.matrix.rmsd[i][i], Some(0.0));
+        }
+    }
+
+    #[test]
+    fn compare_set_writes_json_and_csv_outputs() {
+        use structscope_core::{parse_str, InputFormat, ParseOptions};
+
+        let structures = [
+            parse_str(
+                &mini_pdb(0.0),
+                InputFormat::Pdb,
+                Some("s1.pdb".to_string()),
+                ParseOptions::default(),
+            )
+            .unwrap(),
+            parse_str(
+                &mini_pdb(1.0),
+                InputFormat::Pdb,
+                Some("s2.pdb".to_string()),
+                ParseOptions::default(),
+            )
+            .unwrap(),
+        ];
+        let records = vec![sasa_record("s1", 900.0), sasa_record("s2", 950.0)];
+        let paths = vec![PathBuf::from("s1.pdb"), PathBuf::from("s2.pdb")];
+        let result = compare_set(
+            &structures,
+            &records,
+            &paths,
+            &default_params(),
+            &ReferenceMode::FirstInput,
+            Some(&["sasa_total".to_string()]),
+            None,
+        )
+        .unwrap();
+
+        let out_dir = std::env::temp_dir().join(format!(
+            "structscope-compare-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&out_dir);
+        write_compare_json(&out_dir, &result).unwrap();
+        write_compare_csv(&out_dir, &result).unwrap();
+
+        assert!(out_dir.join("matrix.json").is_file());
+        assert!(out_dir.join("deltas.jsonl").is_file());
+        assert!(out_dir.join("matrix.csv").is_file());
+        assert!(out_dir.join("deltas.csv").is_file());
+
+        let matrix_json = fs::read_to_string(out_dir.join("matrix.json")).unwrap();
+        assert!(matrix_json.contains("\"labels\""));
+        let deltas_jsonl = fs::read_to_string(out_dir.join("deltas.jsonl")).unwrap();
+        assert!(deltas_jsonl.contains("delta_sasa_total"));
+
+        let _ = fs::remove_dir_all(&out_dir);
     }
 }
