@@ -22,12 +22,31 @@ Compute structure-level features and write them to an output directory
 structscope featurize 1nkd.cif.gz --out ./out
 structscope featurize ./structures --out ./out --provenance
 structscope featurize ./structures --out ./out --provenance -j 4
+structscope featurize ./structures --out ./out --ligand-exclude SO4,PO4
 ```
+
+Optional ligand flags (also on `ligands`):
+
+- `--ligand-exclude RES[,RES...]` — add residue names to the default denylist
+- `--ligand-include RES[,RES...]` — allowlist mode; only these hetero residues count
+- `--binding-distance <Å>` — binding-site cutoff (default `5.0`)
 
 Emitted features include counts (atoms, residues, chains, ligands), graph
 metrics (contacts, density, clustering), geometry (radius of gyration, SASA),
-secondary-structure composition, typed-interaction counts, and
+secondary-structure composition, typed-interaction counts, protein–ligand
+interaction counts, binding-site residue count, ligand SASA, and
 buried/exposed residue counts.
+
+## ligands
+
+Emit one JSON record per filtered ligand (SASA, binding-site residues,
+interaction counts).
+
+```
+structscope ligands 1nkd.cif.gz
+structscope ligands complex.cif.gz --out ligands.jsonl
+structscope ligands complex.cif.gz --ligand-include HEM,NAG --binding-distance 4.0
+```
 
 ## residues
 

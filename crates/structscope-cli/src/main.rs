@@ -3,11 +3,12 @@ use clap::{Parser, Subcommand, ValueEnum};
 use rayon::prelude::*;
 use serde_json::json;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use structscope_agent::guard_available;
-use structscope_core::{kabsch, needleman_wunsch, parse_file, smith_waterman, three_to_one, ParseOptions, Structure};
+use structscope_core::{kabsch, needleman_wunsch, parse_file, smith_waterman, three_to_one, LigandFilter, ParseOptions, Structure};
 use structscope_events::Event;
-use structscope_features::{compute_features, per_residue::per_residue_features};
+use structscope_features::{compute_features, ligand::per_ligand_features, per_residue::per_residue_features};
 use structscope_graphs::{
     atom_id_to_residue_id, build_atom_graph, build_interface_graph, build_residue_graph,
     ChemicalInteraction, export_gml, export_graphml, export_html, export_json,
@@ -21,6 +22,34 @@ use walkdir::WalkDir;
 struct Cli {
     #[command(subcommand)]
     command: Commands,
+}
+
+#[derive(Parser, Clone, Default)]
+struct LigandCliArgs {
+    #[arg(long, value_delimiter = ',')]
+    ligand_exclude: Vec<String>,
+    #[arg(long, value_delimiter = ',')]
+    ligand_include: Vec<String>,
+    #[arg(long, default_value_t = 5.0)]
+    binding_distance: f64,
+}
+
+fn build_ligand_filter(args: &LigandCliArgs) -> LigandFilter {
+    if !args.ligand_include.is_empty() {
+        let names: Vec<&str> = args.ligand_include.iter().map(|s| s.as_str()).collect();
+        LigandFilter::include_only(&names)
+    } else {
+        LigandFilter::default().with_extra_exclude(
+            &args.ligand_exclude.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+        )
+    }
+}
+
+fn validate_binding_distance(distance: f64) -> Result<()> {
+    if distance <= 0.0 {
+        anyhow::bail!("binding distance must be positive, got {distance}");
+    }
+    Ok(())
 }
 
 #[derive(Subcommand)]
@@ -46,6 +75,16 @@ enum Commands {
         guard: bool,
         #[arg(long, short = 'j')]
         jobs: Option<usize>,
+        #[command(flatten)]
+        ligand: LigandCliArgs,
+    },
+    /// Emit per-ligand features (SASA, binding-site residues, interaction counts) as JSONL.
+    Ligands {
+        input: PathBuf,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[command(flatten)]
+        ligand: LigandCliArgs,
     },
     Graph {
         input: PathBuf,
@@ -108,7 +147,9 @@ fn main() -> Result<()> {
             jsonl,
             guard,
             jobs,
-        } => cmd_featurize(&input, &out, provenance, sqlite, jsonl, guard, jobs),
+            ligand,
+        } => cmd_featurize(&input, &out, provenance, sqlite, jsonl, guard, jobs, &ligand),
+        Commands::Ligands { input, out, ligand } => cmd_ligands(&input, out, &ligand),
         Commands::Graph {
             input,
             graph_type,
@@ -155,7 +196,11 @@ fn cmd_featurize(
     jsonl: Option<PathBuf>,
     guard: bool,
     jobs: Option<usize>,
+    ligand_args: &LigandCliArgs,
 ) -> Result<()> {
+    validate_binding_distance(ligand_args.binding_distance)?;
+    let filter = build_ligand_filter(ligand_args);
+    let binding_distance = ligand_args.binding_distance;
     let inputs = collect_inputs(input)?;
     fs::create_dir_all(out)?;
 
@@ -212,7 +257,7 @@ fn cmd_featurize(
 
             match parse_file(path, ParseOptions::default()) {
                 Ok(structure) => {
-                    let record = compute_features(&structure);
+                    let record = compute_features(&structure, &filter, binding_distance);
                     if provenance {
                         let _ = tx_mutex.lock().unwrap().send(Event::new(
                             "feature_complete",
@@ -431,6 +476,21 @@ fn cmd_rmsd(reference: &Path, mobile: &Path, atoms: &str, align: bool, local: bo
         atoms
     };
     println!("rmsd={:.4}; atoms={}; selection={mode}", sp.rmsd, ref_coords.len());
+    Ok(())
+}
+
+fn cmd_ligands(input: &Path, out: Option<PathBuf>, ligand_args: &LigandCliArgs) -> Result<()> {
+    validate_binding_distance(ligand_args.binding_distance)?;
+    let structure = parse_file(input, ParseOptions::default())?;
+    let filter = build_ligand_filter(ligand_args);
+    let records = per_ligand_features(&structure, &filter, ligand_args.binding_distance);
+    let mut writer: Box<dyn Write> = match out {
+        Some(path) => Box::new(fs::File::create(path)?),
+        None => Box::new(std::io::stdout()),
+    };
+    for record in records {
+        writeln!(writer, "{}", serde_json::to_string(&record)?)?;
+    }
     Ok(())
 }
 

@@ -25,19 +25,19 @@ fn dist(a: &A, b: &A) -> f64 {
 }
 
 /// True for sidechain carboxylate oxygens (ASP/GLU) — salt-bridge anions.
-fn is_acidic_oxygen(res: &str, name: &str) -> bool {
+pub(crate) fn is_acidic_oxygen(res: &str, name: &str) -> bool {
     matches!((res, name), ("ASP", "OD1") | ("ASP", "OD2") | ("GLU", "OE1") | ("GLU", "OE2"))
 }
 
 /// True for sidechain basic nitrogens (LYS/ARG/HIS) — salt-bridge cations.
-fn is_basic_nitrogen(res: &str, name: &str) -> bool {
+pub(crate) fn is_basic_nitrogen(res: &str, name: &str) -> bool {
     matches!(
         (res, name),
         ("LYS", "NZ") | ("ARG", "NH1") | ("ARG", "NH2") | ("ARG", "NE") | ("HIS", "ND1") | ("HIS", "NE2")
     )
 }
 
-fn is_hydrophobic_carbon(res: &str, name: &str) -> bool {
+pub(crate) fn is_hydrophobic_carbon(res: &str, name: &str) -> bool {
     let r = res.trim();
     let n = name.trim();
     if matches!(r, "ALA" | "VAL" | "LEU" | "ILE" | "PRO" | "MET" | "PHE" | "TYR" | "TRP") {
@@ -45,6 +45,19 @@ fn is_hydrophobic_carbon(res: &str, name: &str) -> bool {
     } else {
         false
     }
+}
+
+pub(crate) fn is_hydrogen_bond(a_name: &str, b_name: &str, distance: f64) -> bool {
+    let elem = |n: &str| n.chars().next().unwrap_or(' ');
+    matches!(elem(a_name), 'N' | 'O')
+        && matches!(elem(b_name), 'N' | 'O')
+        && (2.4..=3.5).contains(&distance)
+}
+
+pub(crate) fn is_salt_bridge(a_res: &str, a_name: &str, b_res: &str, b_name: &str, distance: f64) -> bool {
+    ((is_acidic_oxygen(a_res, a_name) && is_basic_nitrogen(b_res, b_name))
+        || (is_acidic_oxygen(b_res, b_name) && is_basic_nitrogen(a_res, a_name)))
+        && distance < 4.0
 }
 
 struct AromaticRing {
@@ -108,20 +121,13 @@ pub fn interactions(structure: &Structure) -> Vec<Interaction> {
                 continue;
             }
 
-            let salt = (is_acidic_oxygen(&a.res, &a.name) && is_basic_nitrogen(&b.res, &b.name))
-                || (is_acidic_oxygen(&b.res, &b.name) && is_basic_nitrogen(&a.res, &a.name));
-            if salt && d < 4.0 {
+            if is_salt_bridge(&a.res, &a.name, &b.res, &b.name, d) {
                 out.push(Interaction { kind: "salt_bridge", atom_id_a: a.id.clone(), atom_id_b: b.id.clone(), distance: d });
                 continue;
             }
 
             // Polar contact: a donor/acceptor pair of N/O atoms on different residues.
-            let elem = |n: &str| n.chars().next().unwrap_or(' ');
-            if a.res_id != b.res_id
-                && matches!(elem(&a.name), 'N' | 'O')
-                && matches!(elem(&b.name), 'N' | 'O')
-                && (2.4..=3.5).contains(&d)
-            {
+            if a.res_id != b.res_id && is_hydrogen_bond(&a.name, &b.name, d) {
                 out.push(Interaction { kind: "hydrogen_bond", atom_id_a: a.id.clone(), atom_id_b: b.id.clone(), distance: d });
             }
         }

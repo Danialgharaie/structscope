@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
-use structscope_core::Structure;
+use structscope_core::{LigandFilter, Structure};
 use structscope_graphs::{build_interface_graph, build_residue_graph};
 
 pub mod dihedral;
 pub mod interactions;
+pub mod ligand;
 pub mod per_residue;
 pub mod sasa;
 pub mod ss;
@@ -16,16 +17,23 @@ pub struct FeatureRecord {
     pub features: Map<String, Value>,
 }
 
-pub fn compute_features(structure: &Structure) -> FeatureRecord {
+pub fn compute_features(structure: &Structure, filter: &LigandFilter, binding_distance: f64) -> FeatureRecord {
     let summary = structure.summary();
     let residue_graph = build_residue_graph(structure, 8.0, None);
     let interface_graph = build_interface_graph(structure, 8.0, None);
+    let ligand_count = structure
+        .chains
+        .iter()
+        .flat_map(|c| &c.residues)
+        .filter(|r| filter.is_ligand(r))
+        .count();
+    let pl = ligand::protein_ligand_summary(structure, filter, binding_distance);
 
     let mut features = Map::new();
     features.insert("atom_count".to_string(), json!(summary.atom_count));
     features.insert("residue_count".to_string(), json!(summary.residue_count));
     features.insert("chain_count".to_string(), json!(summary.chain_count));
-    features.insert("ligand_count".to_string(), json!(summary.ligand_count));
+    features.insert("ligand_count".to_string(), json!(ligand_count));
     features.insert("heteroatom_count".to_string(), json!(summary.heteroatom_count));
     features.insert("contact_count".to_string(), json!(residue_graph.edge_count()));
     features.insert("interface_contact_count".to_string(), json!(interface_graph.edge_count()));
@@ -110,6 +118,22 @@ pub fn compute_features(structure: &Structure) -> FeatureRecord {
     );
     features.insert("clustering_coefficient".to_string(), json!(clustering_coefficient(&residue_graph)));
     features.insert("degree_distribution".to_string(), json!(degree_distribution(&residue_graph)));
+    features.insert("ligand_sasa_total".to_string(), json!(pl.ligand_sasa_total));
+    features.insert("ligand_sasa_mean".to_string(), json!(pl.ligand_sasa_mean));
+    features.insert("binding_site_residue_count".to_string(), json!(pl.binding_site_residue_count));
+    features.insert("protein_ligand_hbond_count".to_string(), json!(pl.protein_ligand_hbond_count));
+    features.insert(
+        "protein_ligand_salt_bridge_count".to_string(),
+        json!(pl.protein_ligand_salt_bridge_count),
+    );
+    features.insert(
+        "protein_ligand_hydrophobic_count".to_string(),
+        json!(pl.protein_ligand_hydrophobic_count),
+    );
+    features.insert(
+        "protein_ligand_contact_count".to_string(),
+        json!(pl.protein_ligand_contact_count),
+    );
 
     FeatureRecord {
         structure_id: structure.id.clone(),
@@ -210,7 +234,7 @@ fn clustering_coefficient(graph: &structscope_graphs::ResidueGraph) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use structscope_core::{parse_str, InputFormat, ParseOptions};
+    use structscope_core::{parse_str, InputFormat, LigandFilter, ParseOptions};
 
     const PDB_SAMPLE: &str = "\
 ATOM      1  N   GLY A   1      11.104  13.207   8.292  1.00 20.00           N
@@ -221,9 +245,22 @@ ATOM      3  C   GLY A   2      13.100  12.800   8.900  1.00 20.00           C
     #[test]
     fn computes_basic_features() {
         let structure = parse_str(PDB_SAMPLE, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
-        let record = compute_features(&structure);
+        let record = compute_features(&structure, &LigandFilter::default(), 5.0);
         assert_eq!(record.features["atom_count"].as_u64(), Some(3));
         assert_eq!(record.features["residue_count"].as_u64(), Some(2));
         assert!(record.features["radius_of_gyration"].as_f64().unwrap() >= 0.0);
+    }
+
+    #[test]
+    fn includes_ligand_features_when_hem_present() {
+        let pdb = "\
+ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 0.00           C
+HETATM    2  C1  HEM A 501       4.000   0.000   0.000  1.00 0.00           C
+HETATM    3  O   HOH A 502      20.000   0.000   0.000  1.00 0.00           O
+";
+        let structure = parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
+        let record = compute_features(&structure, &LigandFilter::default(), 5.0);
+        assert_eq!(record.features["ligand_count"].as_u64(), Some(1));
+        assert!(record.features["ligand_sasa_total"].as_f64().unwrap() > 0.0);
     }
 }
