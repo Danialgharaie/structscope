@@ -1,4 +1,158 @@
+use std::path::{Path, PathBuf};
+
+use anyhow::{anyhow, bail, Result};
+use serde_json::Value;
 use structscope_core::{superposition_rmsd, RmsdParams, Structure};
+
+use crate::FeatureRecord;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReferenceMode {
+    FirstInput,
+    ExplicitPath(PathBuf),
+    AutoQuality,
+    ByField { maximize: bool, field: String },
+}
+
+pub fn pick_reference_index(
+    records: &[FeatureRecord],
+    paths: &[PathBuf],
+    mode: &ReferenceMode,
+) -> Result<usize> {
+    if records.is_empty() {
+        bail!("no feature records");
+    }
+    if paths.len() != records.len() {
+        bail!(
+            "paths length ({}) must match records length ({})",
+            paths.len(),
+            records.len()
+        );
+    }
+
+    match mode {
+        ReferenceMode::FirstInput => Ok(0),
+        ReferenceMode::ExplicitPath(path) => find_explicit_index(records, paths, path),
+        ReferenceMode::AutoQuality => pick_auto_quality(records),
+        ReferenceMode::ByField { maximize, field } => pick_by_field(records, *maximize, field),
+    }
+}
+
+fn find_explicit_index(
+    records: &[FeatureRecord],
+    paths: &[PathBuf],
+    target: &Path,
+) -> Result<usize> {
+    if let Some(index_str) = target.to_str().and_then(|s| s.strip_prefix('#')) {
+        if let Ok(index) = index_str.parse::<usize>() {
+            if index < records.len() {
+                return Ok(index);
+            }
+            bail!("reference index {index} out of range (0..{})", records.len());
+        }
+    }
+
+    let target_str = target.to_string_lossy();
+    for (index, (record, path)) in records.iter().zip(paths.iter()).enumerate() {
+        if paths_match(path, target)
+            || record
+                .source_path
+                .as_deref()
+                .is_some_and(|source| paths_match(Path::new(source), target))
+            || record.structure_id == target_str
+            || path.file_name().is_some_and(|name| name == target.as_os_str())
+        {
+            return Ok(index);
+        }
+    }
+
+    bail!("reference path not found in input set: {}", target.display())
+}
+
+fn paths_match(left: &Path, right: &Path) -> bool {
+    left == right
+        || left
+            .file_name()
+            .zip(right.file_name())
+            .is_some_and(|(left, right)| left == right)
+        || canonicalize_if_exists(left).is_some_and(|left| {
+            canonicalize_if_exists(right).is_some_and(|right| left == right)
+        })
+}
+
+fn canonicalize_if_exists(path: &Path) -> Option<PathBuf> {
+    path.canonicalize().ok()
+}
+
+fn pick_auto_quality(records: &[FeatureRecord]) -> Result<usize> {
+    let mut best_index = 0usize;
+    let mut best_key = quality_key(&records[0], 0)?;
+
+    for (index, record) in records.iter().enumerate().skip(1) {
+        let key = quality_key(record, index)?;
+        if key < best_key {
+            best_key = key;
+            best_index = index;
+        }
+    }
+
+    Ok(best_index)
+}
+
+fn quality_key(record: &FeatureRecord, tie_breaker: usize) -> Result<(u64, u64, u64, usize)> {
+    Ok((
+        feature_u64(record, "ramachandran_outlier_count")?,
+        feature_u64(record, "clash_pair_count")?,
+        feature_u64(record, "missing_backbone_residue_count")?,
+        tie_breaker,
+    ))
+}
+
+fn pick_by_field(records: &[FeatureRecord], maximize: bool, field: &str) -> Result<usize> {
+    let mut best_index = 0usize;
+    let mut best_value = feature_f64(&records[0], field)?;
+
+    for (index, record) in records.iter().enumerate().skip(1) {
+        let value = feature_f64(record, field)?;
+        let is_better = if maximize {
+            value > best_value
+        } else {
+            value < best_value
+        };
+        if is_better {
+            best_index = index;
+            best_value = value;
+        }
+    }
+
+    Ok(best_index)
+}
+
+fn feature_u64(record: &FeatureRecord, field: &str) -> Result<u64> {
+    let value = record
+        .features
+        .get(field)
+        .ok_or_else(|| anyhow!("missing feature field: {field}"))?;
+    value
+        .as_u64()
+        .or_else(|| value.as_f64().map(|v| v as u64))
+        .ok_or_else(|| anyhow!("feature {field} is not numeric"))
+}
+
+fn feature_f64(record: &FeatureRecord, field: &str) -> Result<f64> {
+    let value = record
+        .features
+        .get(field)
+        .ok_or_else(|| anyhow!("missing feature field: {field}"))?;
+    value_as_f64(value).ok_or_else(|| anyhow!("feature {field} is not numeric"))
+}
+
+fn value_as_f64(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(number) => number.as_f64(),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct RmsdMatrix {
@@ -31,7 +185,73 @@ pub fn rmsd_matrix(structures: &[Structure], params: &RmsdParams) -> RmsdMatrix 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::{json, Map};
     use structscope_core::{Atom, Chain, Residue, Structure, StructureMetadata};
+
+    fn feature_record(id: &str, features: Map<String, Value>) -> FeatureRecord {
+        FeatureRecord {
+            structure_id: id.to_string(),
+            source_path: None,
+            features,
+        }
+    }
+
+    fn quality_record(id: &str, outliers: u64, clashes: u64, missing_backbone: u64) -> FeatureRecord {
+        let mut features = Map::new();
+        features.insert("ramachandran_outlier_count".to_string(), json!(outliers));
+        features.insert("clash_pair_count".to_string(), json!(clashes));
+        features.insert(
+            "missing_backbone_residue_count".to_string(),
+            json!(missing_backbone),
+        );
+        feature_record(id, features)
+    }
+
+    fn sasa_record(id: &str, sasa_total: f64) -> FeatureRecord {
+        let mut features = Map::new();
+        features.insert("sasa_total".to_string(), json!(sasa_total));
+        feature_record(id, features)
+    }
+
+    #[test]
+    fn auto_quality_picks_lowest_outlier_count() {
+        let records = vec![
+            quality_record("high_outliers", 5, 0, 0),
+            quality_record("best", 1, 10, 5),
+            quality_record("medium_outliers", 3, 0, 0),
+        ];
+        let paths = vec![
+            PathBuf::from("a.pdb"),
+            PathBuf::from("b.pdb"),
+            PathBuf::from("c.pdb"),
+        ];
+
+        let index = pick_reference_index(&records, &paths, &ReferenceMode::AutoQuality).unwrap();
+
+        assert_eq!(index, 1);
+    }
+
+    #[test]
+    fn min_sasa_total_picks_correct_index() {
+        let records = vec![
+            sasa_record("large", 1500.0),
+            sasa_record("smallest", 900.0),
+            sasa_record("middle", 1200.0),
+        ];
+        let paths = vec![
+            PathBuf::from("large.pdb"),
+            PathBuf::from("smallest.pdb"),
+            PathBuf::from("middle.pdb"),
+        ];
+        let mode = ReferenceMode::ByField {
+            maximize: false,
+            field: "sasa_total".to_string(),
+        };
+
+        let index = pick_reference_index(&records, &paths, &mode).unwrap();
+
+        assert_eq!(index, 1);
+    }
 
     fn ca_atom(x: f64, y: f64, z: f64) -> Atom {
         Atom {
