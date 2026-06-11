@@ -1,0 +1,34 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>structscope icon</title>
+  <desc>structscope icon — a protein backbone ribbon viewed through a scope aperture.</desc>
+  <defs>
+    <clipPath id="sq"><rect x="0" y="0" width="512" height="512" rx="96"/></clipPath>
+    <clipPath id="ap"><circle cx="256" cy="256" r="150"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#sq)">
+    <rect x="0" y="0" width="512" height="512" fill="#F4ECE3"/>
+
+    <!-- Scope ring -->
+    <circle cx="256" cy="256" r="170" fill="none" stroke="#B7410E" stroke-width="11"/>
+    <circle cx="256" cy="256" r="150" fill="#FBF6EF" stroke="#3A4A52" stroke-width="4"/>
+
+    <!-- Backbone ribbon -->
+    <g clip-path="url(#ap)">
+      <path d="M120 330 C 146 200, 196 340, 230 218 S 306 158, 352 256 S 386 332, 398 196"
+        fill="none" stroke="#3A4A52" stroke-width="20" stroke-linecap="round"/>
+      <path d="M120 330 C 146 200, 196 340, 230 218 S 306 158, 352 256 S 386 332, 398 196"
+        fill="none" stroke="#DE6B33" stroke-width="8" stroke-linecap="round" stroke-dasharray="3 25"/>
+      <circle cx="120" cy="330" r="16" fill="#B7410E"/>
+      <circle cx="230" cy="218" r="14" fill="#3A4A52"/>
+      <circle cx="352" cy="256" r="14" fill="#3A4A52"/>
+      <circle cx="398" cy="196" r="16" fill="#B7410E"/>
+    </g>
+
+    <!-- Crosshair ticks -->
+    <line x1="256" y1="74" x2="256" y2="104" stroke="#3A4A52" stroke-width="6" stroke-linecap="round"/>
+    <line x1="256" y1="408" x2="256" y2="438" stroke="#3A4A52" stroke-width="6" stroke-linecap="round"/>
+    <line x1="74" y1="256" x2="104" y2="256" stroke="#3A4A52" stroke-width="6" stroke-linecap="round"/>
+    <line x1="408" y1="256" x2="438" y2="256" stroke="#3A4A52" stroke-width="6" stroke-linecap="round"/>
+  </g>
+</svg>

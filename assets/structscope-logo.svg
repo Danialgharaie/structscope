@@ -1,0 +1,36 @@
+<svg width="680" height="300" viewBox="0 0 680 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>structscope</title>
+  <desc>structscope logo — a protein backbone ribbon viewed through a scope aperture, with the structscope wordmark.</desc>
+  <defs>
+    <clipPath id="scopeClip"><circle cx="150" cy="150" r="92"/></clipPath>
+  </defs>
+
+  <!-- Scope ring -->
+  <circle cx="150" cy="150" r="104" fill="none" stroke="#B7410E" stroke-width="6"/>
+  <circle cx="150" cy="150" r="92" fill="#F4ECE3" stroke="#3A4A52" stroke-width="2.5"/>
+
+  <!-- Backbone ribbon inside aperture -->
+  <g clip-path="url(#scopeClip)">
+    <rect x="58" y="58" width="184" height="184" fill="#F4ECE3"/>
+    <path d="M74 196 C 90 120, 120 200, 138 130 S 180 96, 206 150 S 226 196, 232 118"
+      fill="none" stroke="#3A4A52" stroke-width="11" stroke-linecap="round"/>
+    <path d="M74 196 C 90 120, 120 200, 138 130 S 180 96, 206 150 S 226 196, 232 118"
+      fill="none" stroke="#DE6B33" stroke-width="4.5" stroke-linecap="round" stroke-dasharray="2 14"/>
+    <circle cx="74" cy="196" r="9" fill="#B7410E"/>
+    <circle cx="138" cy="130" r="8" fill="#3A4A52"/>
+    <circle cx="206" cy="150" r="8" fill="#3A4A52"/>
+    <circle cx="232" cy="118" r="9" fill="#B7410E"/>
+  </g>
+
+  <!-- Crosshair ticks -->
+  <line x1="150" y1="46" x2="150" y2="64" stroke="#3A4A52" stroke-width="3" stroke-linecap="round"/>
+  <line x1="150" y1="236" x2="150" y2="254" stroke="#3A4A52" stroke-width="3" stroke-linecap="round"/>
+  <line x1="46" y1="150" x2="64" y2="150" stroke="#3A4A52" stroke-width="3" stroke-linecap="round"/>
+  <line x1="236" y1="150" x2="254" y2="150" stroke="#3A4A52" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Wordmark -->
+  <text x="290" y="138" font-family="'DejaVu Sans Mono', monospace" font-size="58" font-weight="600" fill="#3A4A52" letter-spacing="-1">struct</text>
+  <text x="290" y="200" font-family="'DejaVu Sans Mono', monospace" font-size="58" font-weight="600" fill="#B7410E" letter-spacing="-1">scope</text>
+  <rect x="292" y="222" width="280" height="4" fill="#DE6B33" rx="2"/>
+  <text x="292" y="252" font-family="'DejaVu Sans', sans-serif" font-size="15" fill="#3A4A52">rust-native structural bioinformatics</text>
+</svg>
