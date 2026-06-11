@@ -1,0 +1,15 @@
+{
+  "pdb": "ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 0.00           C\nATOM      2  CA  ALA B   1       3.500   0.000   0.000  1.00 0.00           C\n",
+  "params": {
+    "contact_distance": 8.0,
+    "area_distance": 5.0,
+    "sc_distance": 5.0
+  },
+  "expected": {
+    "chain_a": "A",
+    "chain_b": "B",
+    "bsa": 52.50557461043114,
+    "interface_area": 52.50557461043114,
+    "shape_complementarity": 0.002637167596216791
+  }
+}
