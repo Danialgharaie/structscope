@@ -2,11 +2,11 @@
 //! Emits raw per-atom areas (Angstrom^2); interpretation is the caller's.
 use structscope_core::Structure;
 
-const PROBE_RADIUS: f64 = 1.4;
+pub(crate) const PROBE_RADIUS: f64 = 1.4;
 const N_POINTS: usize = 92;
 
 /// Bondi van der Waals radii (Angstrom); default covers unlisted elements.
-fn vdw_radius(element: &str) -> f64 {
+pub(crate) fn vdw_radius(element: &str) -> f64 {
     match element.trim().to_ascii_uppercase().as_str() {
         "H" => 1.20,
         "C" => 1.70,
@@ -23,7 +23,7 @@ fn vdw_radius(element: &str) -> f64 {
 }
 
 /// Evenly distributed unit-sphere points via the golden spiral.
-fn sphere_points(n: usize) -> Vec<[f64; 3]> {
+pub(crate) fn sphere_points(n: usize) -> Vec<[f64; 3]> {
     let golden = std::f64::consts::PI * (1.0 + 5.0_f64.sqrt());
     (0..n)
         .map(|k| {
@@ -40,23 +40,30 @@ struct Sphere {
     y: f64,
     z: f64,
     r: f64,
+    chain_label: String,
 }
 
-/// Per-atom SASA in atom-iteration order (chains -> residues -> atoms).
-pub fn atom_sasa(structure: &Structure) -> Vec<f64> {
-    let spheres: Vec<Sphere> = structure
-        .chains
-        .iter()
-        .flat_map(|chain| &chain.residues)
-        .flat_map(|residue| &residue.atoms)
-        .map(|atom| Sphere {
-            x: atom.x,
-            y: atom.y,
-            z: atom.z,
-            r: vdw_radius(atom.element.as_deref().unwrap_or("")) + PROBE_RADIUS,
-        })
-        .collect();
+fn build_spheres(structure: &Structure) -> Vec<Sphere> {
+    let mut spheres = Vec::new();
+    for chain in &structure.chains {
+        let label = chain.label.clone();
+        for residue in &chain.residues {
+            for atom in &residue.atoms {
+                spheres.push(Sphere {
+                    x: atom.x,
+                    y: atom.y,
+                    z: atom.z,
+                    r: vdw_radius(atom.element.as_deref().unwrap_or("")) + PROBE_RADIUS,
+                    chain_label: label.clone(),
+                });
+            }
+        }
+    }
+    spheres
+}
 
+fn atom_sasa_with_neighbor_filter(structure: &Structure, neighbor_chain: Option<&str>) -> Vec<f64> {
+    let spheres = build_spheres(structure);
     let points = sphere_points(N_POINTS);
 
     spheres
@@ -68,11 +75,17 @@ pub fn atom_sasa(structure: &Structure) -> Vec<f64> {
                 .iter()
                 .enumerate()
                 .filter(|(j, other)| {
-                    *j != i && {
-                        let (dx, dy, dz) = (other.x - atom.x, other.y - atom.y, other.z - atom.z);
-                        let cutoff = atom.r + other.r;
-                        dx * dx + dy * dy + dz * dz < cutoff * cutoff
+                    if *j == i {
+                        return false;
                     }
+                    if let Some(chain) = neighbor_chain {
+                        if other.chain_label != chain {
+                            return false;
+                        }
+                    }
+                    let (dx, dy, dz) = (other.x - atom.x, other.y - atom.y, other.z - atom.z);
+                    let cutoff = atom.r + other.r;
+                    dx * dx + dy * dy + dz * dz < cutoff * cutoff
                 })
                 .map(|(_, other)| other)
                 .collect();
@@ -89,6 +102,42 @@ pub fn atom_sasa(structure: &Structure) -> Vec<f64> {
                 .count();
 
             4.0 * std::f64::consts::PI * atom.r * atom.r * accessible as f64 / N_POINTS as f64
+        })
+        .collect()
+}
+
+/// Per-atom SASA in atom-iteration order (chains -> residues -> atoms).
+pub fn atom_sasa(structure: &Structure) -> Vec<f64> {
+    atom_sasa_with_neighbor_filter(structure, None)
+}
+
+/// Per-atom SASA using only atoms on `chain_label` as occluding neighbours.
+pub fn atom_sasa_chain_neighbors(structure: &Structure, chain_label: &str) -> Vec<f64> {
+    atom_sasa_with_neighbor_filter(structure, Some(chain_label))
+}
+
+/// Per-atom buried SASA: max(mono - complex, 0) on interface chains, else 0.
+pub fn atom_buried_sasa_deltas(
+    complex: &[f64],
+    mono_a: &[f64],
+    mono_b: &[f64],
+    atom_chain_labels: &[String],
+    chain_a: &str,
+    chain_b: &str,
+) -> Vec<f64> {
+    complex
+        .iter()
+        .enumerate()
+        .map(|(i, &c)| {
+            let label = atom_chain_labels.get(i).map(String::as_str).unwrap_or("");
+            let mono = if label == chain_a {
+                mono_a.get(i).copied().unwrap_or(0.0)
+            } else if label == chain_b {
+                mono_b.get(i).copied().unwrap_or(0.0)
+            } else {
+                return 0.0;
+            };
+            (mono - c).max(0.0)
         })
         .collect()
 }
@@ -156,5 +205,45 @@ ATOM      5  C   GLY A   5       0.000  -2.000   0.000  1.00 0.00           C
         let per_atom = atom_sasa(&s);
         let isolated = 4.0 * std::f64::consts::PI * (1.70 + PROBE_RADIUS).powi(2);
         assert!(per_atom[0] < isolated, "central atom should be partly buried");
+    }
+
+    fn chain_labels(structure: &structscope_core::Structure) -> Vec<String> {
+        structure
+            .chains
+            .iter()
+            .flat_map(|chain| {
+                let label = chain.label.clone();
+                std::iter::repeat_n(label, chain.residues.iter().map(|r| r.atoms.len()).sum())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn chain_isolated_sasa_matches_complex_for_single_chain() {
+        let pdb = "\
+ATOM      1  CA  GLY A   1       0.000   0.000   0.000  1.00 0.00           C
+ATOM      2  CA  GLY A   2       3.800   0.000   0.000  1.00 0.00           C
+";
+        let s = parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
+        let complex = atom_sasa(&s);
+        let mono_a = atom_sasa_chain_neighbors(&s, "A");
+        assert_eq!(complex.len(), mono_a.len());
+        for (c, m) in complex.iter().zip(mono_a.iter()) {
+            assert!((c - m).abs() < 1e-9, "single chain: complex {c} mono {m}");
+        }
+    }
+
+    #[test]
+    fn buried_sasa_positive_for_synthetic_dimer() {
+        let pdb = "\
+ATOM      1  CA  ALA A   1       0.000   0.000   0.000  1.00 0.00           C
+ATOM      2  CA  ALA B   1       3.500   0.000   0.000  1.00 0.00           C
+";
+        let s = parse_str(pdb, InputFormat::Pdb, None, ParseOptions::default()).unwrap();
+        let complex = atom_sasa(&s);
+        let mono_a = atom_sasa_chain_neighbors(&s, "A");
+        let mono_b = atom_sasa_chain_neighbors(&s, "B");
+        let delta = atom_buried_sasa_deltas(&complex, &mono_a, &mono_b, &chain_labels(&s), "A", "B");
+        assert!(delta.iter().sum::<f64>() > 0.0);
     }
 }
