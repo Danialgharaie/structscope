@@ -5,6 +5,8 @@ All notable changes to this project are documented here. This project follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-06-11
+
 ### Added
 
 - Parallel execution support for `structscope featurize` using Rayon, allowing high-performance concurrent parsing and feature extraction controlled via a new `--jobs` / `-j` CLI flag.
