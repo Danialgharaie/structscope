@@ -32,8 +32,22 @@ All notable changes to this project are documented here. This project follows
     correspondence between structures of different lengths.
   - `residues <input>` — per-residue features (SASA, RSA, secondary
     structure, dihedrals) as JSONL.
+  - `ligands <input>` — per-ligand features (SASA, binding-site residues,
+    protein–ligand interaction counts) as JSONL.
+- Protein–ligand features: configurable ligand filter (default excludes water
+  and common ions), structure-level protein–ligand interaction counts,
+  binding-site residue count, and ligand SASA.
 - Structure-level features: `sasa_total`, `helix/strand/coil_residue_count`,
-  `disulfide/salt_bridge/hydrogen_bond_count`, `buried/exposed_residue_count`.
+  `disulfide/salt_bridge/hydrogen_bond_count`, `buried/exposed_residue_count`,
+  `ligand_sasa_total`, `ligand_sasa_mean`, `binding_site_residue_count`,
+  `protein_ligand_hbond_count`, `protein_ligand_salt_bridge_count`,
+  `protein_ligand_hydrophobic_count`, `protein_ligand_contact_count`.
+
+### Changed
+
+- **Breaking:** `ligand_count` in `featurize` now uses the filtered ligand
+  definition (hetero residues minus the default denylist and CLI overrides),
+  not the raw hetero residue count.
 
 ### Notes
 
