@@ -10,11 +10,12 @@ This repository currently contains a bootstrap implementation with:
 - residue, atom, and interface graph construction (GraphML export)
 - structural primitives: solvent accessible surface area (Shrake-Rupley), DSSP-style secondary structure, backbone dihedrals, optimal superposition/RMSD (Kabsch, with optional sequence-alignment correspondence), and typed interactions (disulfides, salt bridges, hydrogen bonds, cation-pi, pi-pi stacking, hydrophobic contacts)
 - configurable ligand identification (`LigandFilter` with default denylist and CLI overrides) and protein–ligand features: binding-site residues, cross-boundary interaction counts, and ligand SASA
+- protein–protein interface metrics (BSA, interface patch area, Lawrence–Colman shape complementarity) with structure-level aggregates in `featurize` and per chain-pair JSONL via `interfaces`; distance cutoffs via `--interface-distance`, `--interface-area-distance`, and `--interface-sc-distance`
 - basic and graph-derived feature extraction, with parallel batch `featurize` via `--jobs` / `-j`
 - JSONL and Parquet feature export
 - DuckDB-backed SQL querying over feature Parquet (build with `--features duckdb`)
 - optional SQLite/JSONL provenance
-- CLI entrypoints for parse, featurize, ligands, graph, query, rmsd, residues, and provenance
+- CLI entrypoints for parse, featurize, interfaces, ligands, graph, query, rmsd, residues, and provenance
 
 Querying is gated behind a Cargo feature because it bundles DuckDB:
 

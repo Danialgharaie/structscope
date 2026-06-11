@@ -37,6 +37,14 @@ All notable changes to this project are documented here. This project follows
 - Protein–ligand features: configurable ligand filter (default excludes water
   and common ions), structure-level protein–ligand interaction counts,
   binding-site residue count, and ligand SASA.
+- Protein–protein interface metrics: buried surface area (BSA), interface patch
+  area, and Lawrence–Colman shape complementarity per contacting chain pair.
+- CLI command:
+  - `interfaces <input>` — per chain-pair interface features (BSA, area, shape
+    complementarity, contact and residue counts) as JSONL.
+- Structure-level interface aggregates and largest-interface fields in
+  `featurize`: `interface_pair_count`, total and max BSA/area/SC, and
+  largest-interface chain IDs.
 - Structure-level features: `sasa_total`, `helix/strand/coil_residue_count`,
   `disulfide/salt_bridge/hydrogen_bond_count`, `buried/exposed_residue_count`,
   `ligand_sasa_total`, `ligand_sasa_mean`, `binding_site_residue_count`,
